@@ -1,0 +1,3 @@
+Use this automation only where you have authorization to copy/mirror the source repositories into the destination repository.
+
+The included code is provided as an automation template. You are responsible for complying with your organization's policies, repository licenses, confidentiality requirements, and GitHub terms.

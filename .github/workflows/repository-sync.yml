@@ -1,0 +1,65 @@
+name: Sync Authorized Repositories
+
+on:
+  workflow_dispatch:
+
+  # schedule:
+  #   # Every 30 minutes.
+  #   # GitHub cron schedules are in UTC.
+  #   - cron: "*/30 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repository-sync
+  cancel-in-progress: true
+
+jobs:
+  sync-repositories:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout destination repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Synchronize source repositories
+        env:
+          SOURCE_GITHUB_TOKEN: ${{ secrets.SOURCE_GITHUB_TOKEN }}
+          SOURCE_ORG: wezva-fintech
+          DESTINATION_REPO: ${{ github.repository }}
+        run: |
+          python scripts/sync_repositories.py
+
+      - name: Show synchronization changes
+        run: |
+          git status --short
+          git diff --stat
+
+      - name: Commit and push synchronization
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git add .
+            git commit -m "chore: synchronize authorized repositories"
+            git push
+          else
+            echo "No repository changes detected."
+          fi

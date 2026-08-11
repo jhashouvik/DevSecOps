@@ -1,0 +1,10 @@
+{
+  "source_org": "wezva-fintech",
+  "include_archived": false,
+  "include_forks": true,
+  "allow_repositories": [
+    "checkout-ui",
+    "payment-deployment"
+  ],
+  "exclude_repositories": []
+}
