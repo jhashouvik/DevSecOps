@@ -45,9 +45,12 @@ jobs:
         env:
           SOURCE_GITHUB_TOKEN: ${{ secrets.DEVSECOPS }}
         run: |
-        echo "SOURCE_GITHUB_TOKEN: $SOURCE_GITHUB_TOKEN"
-        echo "First 4 characters of SOURCE_GITHUB_TOKEN: ${SOURCE_GITHUB_TOKEN:0:4}"
-        
+          if [ -n "$SOURCE_GITHUB_TOKEN" ]; then
+            echo "SOURCE_GITHUB_TOKEN is set (length: ${#SOURCE_GITHUB_TOKEN})"
+          else
+            echo "SOURCE_GITHUB_TOKEN is NOT set or empty"
+          fi
+
       - name: Synchronize source repositories
         env:
           SOURCE_GITHUB_TOKEN: ${{ secrets.DEVSECOPS }}
