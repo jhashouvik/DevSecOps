@@ -3,8 +3,7 @@
   "include_archived": false,
   "include_forks": true,
   "allow_repositories": [
-    "checkout-ui",
-    "payment-deployment"
+    "payment-build"
   ],
   "exclude_repositories": []
 }
