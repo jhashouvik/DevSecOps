@@ -43,7 +43,7 @@ jobs:
 
       - name: Synchronize source repositories
         env:
-          SOURCE_GITHUB_TOKEN: ${{ secrets.SOURCE_GITHUB_TOKEN }}
+          SOURCE_GITHUB_TOKEN: ${{ secrets.DEVSECOPS }}
           SOURCE_ORG: wezva-fintech
           DESTINATION_REPO: ${{ github.repository }}
         run: |
