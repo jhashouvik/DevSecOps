@@ -43,7 +43,7 @@ jobs:
       
       - name: Debug secret
         env:
-          SOURCE_GITHUB_TOKEN: ${{ secrets.DEVSECOPS }}
+          SOURCE_GITHUB_TOKEN: ${{ secrets.DEVSECAI }}
         run: |
           if [ -n "$SOURCE_GITHUB_TOKEN" ]; then
             echo "SOURCE_GITHUB_TOKEN is set (length: ${#SOURCE_GITHUB_TOKEN})"
@@ -53,7 +53,7 @@ jobs:
 
       - name: Synchronize source repositories
         env:
-          SOURCE_GITHUB_TOKEN: ${{ secrets.DEVSECOPS }}
+          SOURCE_GITHUB_TOKEN: ${{ secrets.DEVSECAI }}
           SOURCE_ORG: wezva-fintech
           DESTINATION_REPO: ${{ github.repository }}
         run: |
