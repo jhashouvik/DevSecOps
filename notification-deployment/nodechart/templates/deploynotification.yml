@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nodechart.fullname" . }}-wezvanotificationapp
+  labels:
+  {{- include "nodechart.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.wezvanotificationapp.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: wezvanotificationapp
+    {{- include "nodechart.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wezvanotificationapp
+      {{- include "nodechart.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - env:
+        - name: KUBERNETES_CLUSTER_DOMAIN
+          value: {{ quote .Values.kubernetesClusterDomain }}
+        image: {{ .Values.wezvanotificationapp.wezvanotificationapp.image.repository }}:{{ .Values.wezvanotificationapp.wezvanotificationapp.image.tag
+          | default .Chart.AppVersion }}
+        imagePullPolicy: {{ .Values.wezvanotificationapp.wezvanotificationapp.imagePullPolicy }}
+        name: wezvanotificationapp
+        ports:
+        - containerPort: 3000
+        resources: {{- toYaml .Values.wezvanotificationapp.wezvanotificationapp.resources | nindent
+          10 }}
+      imagePullSecrets:
+      - name: awsecr-cred
+      nodeSelector: {{- toYaml .Values.wezvanotificationapp.nodeSelector | nindent 8 }}
+      serviceAccountName: {{ include "nodechart.serviceAccountName" . }}
+      tolerations: {{- toYaml .Values.wezvanotificationapp.tolerations | nindent 8 }}
+      topologySpreadConstraints: {{- toYaml .Values.wezvanotificationapp.topologySpreadConstraints
+        | nindent 8 }}
+

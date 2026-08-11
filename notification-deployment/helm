@@ -1,0 +1,8 @@
+helm:
+  parameters:
+  - name: wezvafrontendapp.wezvafrontendapp.image.repository
+    value: 001647536300.dkr.ecr.ap-south-1.amazonaws.com/wezvatechfrontend
+    forcestring: true
+  - name: wezvafrontendapp.wezvafrontendapp.image.tag
+    value: fb9
+    forcestring: true

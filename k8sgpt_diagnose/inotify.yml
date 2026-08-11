@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: increase-inotify-limits
+  namespace: kube-system
+  labels:
+    app: increase-inotify-limits
+spec:
+  selector:
+    matchLabels:
+      app: increase-inotify-limits
+  template:
+    metadata:
+      labels:
+        app: increase-inotify-limits
+    spec:
+      hostPID: true
+      containers:
+        - name: sysctl
+          image: busybox
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Increase the inotify watches to 524288
+              sysctl -w fs.inotify.max_user_watches=524288
+
+              # Optional: Also increase max_user_instances
+              sysctl -w fs.inotify.max_user_instances=512
+
+              # Keep the container running
+              sleep infinity
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule

@@ -1,0 +1,36 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+   name: testdeploy
+   namespace: litmus
+   labels:
+     wezvatech: adam
+spec:
+   replicas: 2
+   selector:
+    matchLabels:
+     wezvatech: adam
+   template:
+     metadata:
+       name: testpod
+       labels:
+         wezvatech: adam
+     spec:
+      containers:
+        - name: main
+          image: httpd
+          ports:
+           - containerPort: 80
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: demoservice
+  namespace: litmus
+spec:
+  ports:
+    - port: 80
+      targetPort: 80
+  selector:
+    wezvatech: adam
+  type: ClusterIP

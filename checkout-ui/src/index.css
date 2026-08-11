@@ -1,0 +1,12 @@
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #eef2f5;
+  color: #333;
+  -webkit-font-smoothing: antialiased;
+}
+
+.transfer-btn:hover {
+  background-color: #0043a4 !important;
+  transition: background-color 0.2s ease-in-out;
+}

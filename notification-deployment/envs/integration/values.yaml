@@ -1,0 +1,17 @@
+wezvanotificationapp:
+  replicas: 1
+  wezvanotificationapp:
+    image:
+      repository: 081654307023.dkr.ecr.ap-south-1.amazonaws.com/wezvatechnotification
+      tag: fb47
+notificationSvc:
+  ports:
+    - nodePort: 30000
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+mysqlCreds:
+  database: "mywezvadb"
+  password: "password"
+  rootpassword: "password"
+  username: "wezvatech"
