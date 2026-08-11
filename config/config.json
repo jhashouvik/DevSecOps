@@ -3,15 +3,7 @@
   "include_archived": false,
   "include_forks": true,
   "allow_repositories": [
-    "payment-build",
-    "checkout-ui",
-    "payment-deployment",
-    "notification-deployment",
-    "ledger-deployment",
-    "ledger-build",
-    "notification-build",
-    "k8sgpt_diagnose"
-
+    "payment-build"
   ],
   "exclude_repositories": []
 }
