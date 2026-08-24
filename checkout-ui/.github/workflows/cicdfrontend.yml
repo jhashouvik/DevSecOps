@@ -1,0 +1,100 @@
+name: "Frontend GitOps Assest Sync"
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      s3bucket:
+        description: "s3 bucket"
+        required: true
+        default: "wezvatech-eks-backup-2026-may"
+jobs:
+  deploy:
+    name: "Build & Deploy Frontend"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'package-lock.json'
+
+      - name: Install Dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: NPM Audit Scan
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+      - name: Run Trivy FS Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'HIGH,CRITICAL'
+
+      - name: Run Semgrep SAST
+        continue-on-error: true
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: auto
+
+      - name: Install Test Dependencies
+        run: |
+          npm install --save-dev \
+           vitest \
+           jsdom \
+           @testing-library/react \
+           @testing-library/jest-dom \
+           @vitest/coverage-v8
+
+      - name: Run Unit Tests
+        run: npm test
+
+      - name: Code Coverage
+        run: npx vitest run --coverage
+
+      - name: SonarCloud SAST Scan
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.sonarcloud }}
+        with:
+          args: >
+            -Dsonar.projectKey=wezva-fintech_checkout-ui
+            -Dsonar.organization=wezva-fintech
+            -Dsonar.sources=src
+            -Dsonar.test.inclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.typescript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.branch.name=${{ github.ref_name }}
+            -Dsonar.qualitygate.wait=true
+
+      - name: Build Application
+        run: npm run build
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Reconcile S3 Asset State
+        run: |
+          aws s3 sync dist/ s3://${{ github.event.inputs.s3bucket || 'wezvatech-eks-backup-2026-may' }}/ --delete
+
+#      - name: Invalidate CDN Edge Cache
+#        run: |
+#          aws cloudfront create-invalidation \
+#            --distribution-id E37FQUI5EWS0E6 \
+#            --paths "/*"

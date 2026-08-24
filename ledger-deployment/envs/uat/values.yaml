@@ -1,0 +1,16 @@
+wezvaledgerapp:
+  wezvaledgerapp:
+    image:
+      image: 081654307023.dkr.ecr.ap-south-1.amazonaws.com/wezvatechledger
+      tag: rel49
+ledgerSvc:
+  ports:
+  - nodePort: 30000
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+mysqlCreds:
+  database: "mywezvadb"
+  password: "password"
+  rootpassword: "password"
+  username: "wezvatech"

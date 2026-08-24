@@ -1,0 +1,61 @@
+cluster:
+  name: my-monitored-cluster
+destinations:
+  - name: loki-destination
+    type: loki
+    url: http://loki.loki.svc.cluster.local:3100/loki/api/v1/push
+    extraHttpHeaders:
+      X-Scope-OrgID: "fake"
+clusterEvents:
+  enabled: true
+collector:
+  alloy-logs:
+    enabled: true
+    # Add the custom configuration here
+    alloy:
+      configMap:
+        content: |-
+          local.file_match "k8sgpt_file" {
+            path_targets = [ "/home/ubuntu/k8sgptresults.json" ]
+          }
+
+          loki.source.file "k8sgpt_log_file" {
+            targets    = local.file_match.k8sgpt_file.targets
+            forward_to = [loki.process.k8sgpt_json.receiver]
+          }
+
+          loki.process "k8sgpt_json" {
+            forward_to = [loki.write.loki_endpoint.receiver]
+
+            stage.json {
+              expressions = {
+                "k8s_name" = "name",
+                "k8s_namespace" = "namespace",
+                "k8s_kind" = "kind",
+                "k8sgpt_error" = "error",
+                "k8sgpt_details" = "details",
+              }
+            }
+            stage.labels {
+              values = {
+                "k8s_name" = "k8s_name",
+                "k8s_namespace" = "k8s_namespace",
+                "k8s_kind" = "k8s_kind",
+                "k8sgpt_error" = "k8sgpt_error",
+              }
+            }
+          }
+
+          loki.write "loki_endpoint" {
+            endpoint {
+              url = "http://loki.loki.svc.cluster.local:3100/loki/api/v1/push"
+            }
+          }
+      # This enables mounting the host's /var/log directory
+      # This is required so Alloy can access the log file
+      mounts:
+        varlog: true
+podLogs:
+  enabled: false
+alloy-singleton:
+  enabled: true
