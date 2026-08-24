@@ -4,12 +4,14 @@
   "include_forks": true,
   "allow_repositories": [
     "checkout-ui",
-    "payment-deployment",
-    "notification-deployment",
-    "ledger-deployment",
+    "k8sgpt_diagnose",
     "ledger-build",
+    "ledger-deployment",
     "notification-build",
-    "k8sgpt_diagnose"
+    "notification-deployment",
+    "payment-build",
+    "payment-deployment"
+     
   ],
   "exclude_repositories": []
 }
