@@ -10,7 +10,11 @@
     "notification-build",
     "notification-deployment",
     "payment-build",
-    "payment-deployment"
+    "payment-deployment",
+    "terraform-modules",
+    "k8s-notifcation-mongodb",
+    "k8s-payment-mysql",
+    "k8s-ledger-mysql"
      
   ],
   "exclude_repositories": []
