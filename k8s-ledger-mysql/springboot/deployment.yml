@@ -1,0 +1,111 @@
+kind: Rollout
+apiVersion: argoproj.io/v1alpha1
+metadata:
+  name: wezvaspringbootapp
+  namespace: demo  
+  labels:
+    app.kubernetes.io/name: wezvaspringbootapp
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    blueGreen:
+      autoPromotionEnabled: false
+      activeService: ledger-svc
+      previewService: ledgernew-svc
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: wezvaspringbootapp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: wezvaspringbootapp
+    spec:
+     serviceAccountName: wezvatech-admin
+     affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: disktype
+                operator: In
+                values:
+                - ssd
+     imagePullSecrets:
+       - name: ecr-secret
+     initContainers:
+       - name: init-mydb
+         image: busybox:1.28
+         command: ['sh', '-c', "until nslookup mysql-svc.$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace).svc.cluster.local; do echo waiting for mydb; sleep 2; done"]
+         resources:
+            limits:
+              cpu: 400m
+              memory: 500Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+     containers:
+       - name: main
+         image: 081654307023.dkr.ecr.ap-south-1.amazonaws.com/wezvatechledger:rel44
+         imagePullPolicy: IfNotPresent
+         lifecycle:
+           preStop:
+             exec:
+               command: ["/bin/sh", "-c", "sleep 15"] # Gives Kafka client time to stop pulling new messages
+         env:
+         - name: DB_USER
+           valueFrom:
+             secretKeyRef:
+               name: database-secret
+               key: username
+         - name: DB_PASSWORD
+           valueFrom:
+             secretKeyRef:
+               name: database-secret
+               key: password
+         - name: MSK_BOOTSTRAP_SERVERS
+           value: "://amazonaws.com,://amazonaws.com"
+         - name: AWS_REGION
+           value: "ap-south-1"
+         - name: S3_BUCKET_NAME
+           value: "wezvatech-ledger-receipts-prod-env"
+         ports:
+           - containerPort: 8080
+         livenessProbe:
+           httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+           initialDelaySeconds: 90
+           periodSeconds:  45
+           timeoutSeconds:  5
+         readinessProbe:
+           httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+           initialDelaySeconds: 90
+           timeoutSeconds:  5
+           periodSeconds: 5
+         resources:
+            limits:
+              cpu: 400m
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+         volumeMounts:
+         - name: appconfigmap
+           mountPath: "/opt/wezva/application.properties.orig"
+           subPath: application.properties.orig
+         - name: tls-volume
+           mountPath: /etc/tls
+           readOnly: true
+     volumes:
+     - name: appconfigmap
+       configMap:
+         name: wezvaspringbootapp
+         items:
+         - key: application.properties.orig
+           path: application.properties.orig
+     - name: tls-volume
+       secret:
+          secretName: database-ssl-secret

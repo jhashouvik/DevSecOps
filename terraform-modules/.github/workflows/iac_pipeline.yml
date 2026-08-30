@@ -1,0 +1,62 @@
+name: IAC Pipeline
+
+on:
+  workflow_dispatch:
+  
+  push:
+    paths:
+      - 'demo/**'
+      - '.github/workflows/demo.yml'
+    branches:
+      - dev
+
+jobs:
+  terraform-efs: 
+    runs-on: ubuntu-latest
+
+    defaults:
+      run: 
+        working-directory: demo
+
+    steps:
+      # -------------------
+      # demo Provision
+      # -------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: setup terraform
+        uses: hashicorp/setup-terraform@v3
+              
+      - name: config aws credential
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1 
+
+      - name: terraform init
+        run: terraform init
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: Install Checkov
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install checkov
+
+      - name: Run Checkov Scan
+        run: checkov -d . --soft-fail
+
+      - name: terraform plan
+        run: terraform plan
+
+      - name: terraform apply
+        run: terraform apply -auto-approve
+
+      - name: Wait for 10 seconds
+        run: sleep 10
+
+      - name: terraform destroy
+        run: terraform destroy -auto-approve

@@ -1,0 +1,138 @@
+kind: Rollout
+apiVersion: argoproj.io/v1alpha1
+metadata:
+  name: wezvagolangbootapp
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: wezvagolangbootapp
+spec:
+  replicas: 4
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: wezvagolangbootapp
+  strategy:
+    canary:
+      stableService: wezvagolang-stablesvc
+      canaryService: wezvagolang-canarysvc
+      steps:
+        - setWeight: 25
+        - pause: { }
+        - setWeight: 50
+        - pause:
+            duration: 30s
+        - setWeight: 100
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: wezvagolangbootapp
+    spec:
+      imagePullSecrets:
+        - name: ecr-secret
+      initContainers:
+        - name: init-mydb
+          image: busybox:1.28
+          command: ['sh', '-c', "until nslookup mysql-svc.$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace).svc.cluster.local; do echo waiting for mydb; sleep 2; done"]
+          resources:
+            limits:
+              cpu: 400m
+              memory: 500Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+      containers:
+        - name: main
+          image: 081654307023.dkr.ecr.ap-south-1.amazonaws.com/wezvatechpayment:rel43
+          imagePullPolicy: IfNotPresent
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15"] # Gives Kafka client time to stop pulling new messages
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: password
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: host
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: dbname
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: kafka_brokers
+            - name: KAFKA_TOPIC
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: kafka_topic
+            - name: KAFKA_CONSUMER_Group
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: kafka_consumer_group
+            - name: VALKEY_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: VALKEY_HOST
+            - name: VALKEY_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: VALKEY_PORT
+            - name: VALKEY_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: VALKEY_DB
+            - name: VALKEY_TLS_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: VALKEY_TLS_ENABLED
+          ports:
+            - containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: tls-volume
+              mountPath: /etc/tls
+              readOnly: true
+      volumes:
+        - name: tls-volume
+          secret:
+            secretName: database-ssl-secret

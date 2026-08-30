@@ -1,0 +1,18 @@
+kind: NetworkPolicy
+apiVersion: projectcalico.org/v3
+metadata:
+  name: allow-nodejs-ingress
+  namespace: demo
+spec:
+  selector: app.kubernetes.io/name == "wezvanodejsapp"
+  ingress:
+    - action: Allow
+      protocol: TCP
+      destination:
+        ports:
+          - 3000
+  egress:
+    - action: Allow
+  types:
+    - Ingress
+    - Egress

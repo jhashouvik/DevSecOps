@@ -1,0 +1,17 @@
+kind: NetworkPolicy
+apiVersion: projectcalico.org/v3
+metadata:
+  name: allow-sprintboot-ingress
+spec:
+  selector: app.kubernetes.io/name == "wezvaspringbootapp"
+  ingress:
+    - action: Allow
+      protocol: TCP
+      destination:
+        ports:
+          - 8080
+  egress:
+    - action: Allow
+  types:
+    - Ingress
+    - Egress
