@@ -1,0 +1,148 @@
+name: Promote DEV to MAIN
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - dev
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: promote-dev-to-main
+  cancel-in-progress: false
+
+jobs:
+  promote-dev-to-main:
+
+    # Run ONLY when the PR was actually merged into dev.
+    # It will NOT run when a PR is simply closed/rejected.
+    if: github.event.pull_request.merged == true
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch branches
+        run: |
+          git fetch origin dev
+          git fetch origin main
+
+      - name: Show branch status
+        run: |
+          echo "DEV:"
+          git log -1 --oneline origin/dev
+
+          echo "MAIN:"
+          git log -1 --oneline origin/main
+
+      - name: Check whether MAIN already contains DEV
+        id: check_sync
+        run: |
+          if git merge-base --is-ancestor origin/dev origin/main; then
+            echo "already_synced=true" >> "$GITHUB_OUTPUT"
+            echo "MAIN already contains DEV."
+          else
+            echo "already_synced=false" >> "$GITHUB_OUTPUT"
+            echo "DEV contains changes that are not in MAIN."
+          fi
+
+      - name: Check for existing DEV to MAIN PR
+        if: steps.check_sync.outputs.already_synced == 'false'
+        id: existing_pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER=$(gh pr list \
+            --base main \
+            --head dev \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+          if [ -n "$PR_NUMBER" ]; then
+            echo "Existing DEV -> MAIN PR found: #$PR_NUMBER"
+          else
+            echo "No existing DEV -> MAIN PR found."
+          fi
+
+      - name: Create DEV to MAIN Pull Request
+        if: |
+          steps.check_sync.outputs.already_synced == 'false' &&
+          steps.existing_pr.outputs.pr_number == ''
+        id: create_pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_URL=$(gh pr create \
+            --base main \
+            --head dev \
+            --title "Auto Promotion: dev → main" \
+            --body "## Automated DEV → MAIN Promotion
+
+          This pull request was created automatically because a feature pull request was successfully approved and merged into the \`dev\` branch.
+
+          Source branch: \`dev\`
+          Target branch: \`main\`
+
+          Triggering PR:
+          #${{ github.event.pull_request.number }}
+
+          Triggering PR title:
+          ${{ github.event.pull_request.title }}
+
+          Triggered by:
+          ${{ github.actor }}
+
+          This PR keeps \`main\` synchronized with the approved code in \`dev\`.")
+
+          echo "Created PR: $PR_URL"
+
+          PR_NUMBER=$(echo "$PR_URL" | awk -F'/' '{print $NF}')
+
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Determine PR Number
+        if: steps.check_sync.outputs.already_synced == 'false'
+        id: final_pr
+        run: |
+          if [ -n "${{ steps.create_pr.outputs.pr_number }}" ]; then
+            echo "pr_number=${{ steps.create_pr.outputs.pr_number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "pr_number=${{ steps.existing_pr.outputs.pr_number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge DEV to MAIN
+        if: |
+          steps.check_sync.outputs.already_synced == 'false' &&
+          steps.final_pr.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Merging PR #${{ steps.final_pr.outputs.pr_number }}"
+
+          gh pr merge "${{ steps.final_pr.outputs.pr_number }}" \
+            --merge \
+            --delete-branch=false
+
+      - name: Promotion completed
+        run: |
+          echo "----------------------------------------"
+          echo "DEV -> MAIN promotion workflow complete"
+          echo "----------------------------------------"
