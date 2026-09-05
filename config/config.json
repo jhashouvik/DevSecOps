@@ -15,15 +15,11 @@
     "k8s-notifcation-mongodb",
     "k8s-payment-mysql",
     "k8s-ledger-mysql",
-<<<<<<< HEAD
-    "k8s-ledger-mysql"
-=======
     "fraud-deployment",
     "fraud-build",
     "k8s-fraud-neo4j",
     "k8s-eks-karpenter"
 
->>>>>>> origin/main
      
   ],
   "exclude_repositories": []
