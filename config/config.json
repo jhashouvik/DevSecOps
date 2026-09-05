@@ -14,7 +14,12 @@
     "terraform-modules",
     "k8s-notifcation-mongodb",
     "k8s-payment-mysql",
-    "k8s-ledger-mysql"
+    "k8s-ledger-mysql",
+    "fraud-deployment",
+    "fraud-build",
+    "k8s-fraud-neo4j",
+    "k8s-eks-karpenter"
+
      
   ],
   "exclude_repositories": []
