@@ -1,0 +1,28 @@
+apiVersion: "serving.kserve.io/v1beta1"
+kind: "InferenceService"
+metadata:
+  name: "wezvatech-fraud-predictor"
+  namespace: default
+spec:
+  predictor:
+    serviceAccountName: sa-s3-access
+    # FIX: Place labels and annotations directly under the predictor block
+    labels:
+      app: mlserver
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8082"
+      prometheus.io/path: "/metrics"
+    model:
+      modelFormat:
+        name: mlflow
+      protocolVersion: v2
+      storageUri: "s3://wezvatech-fraud-model/2/models/m-99d4256740e146229bbc91918ff07d05/artifacts"
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "512Mi"
+        limits:
+          cpu: "1"
+          memory: "1Gi"
+

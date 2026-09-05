@@ -1,0 +1,33 @@
+# =========================================================================
+# Wezva Technologies - MLOps Platform Engineering Framework
+# Component: Dynamic Multi-Namespace KServe Inference Engine Manifest
+# =========================================================================
+apiVersion: "serving.kserve.io/v1beta1"
+kind: "InferenceService"
+metadata:
+  name: "{{ .Values.modelName }}"
+  namespace: "{{ .Release.Namespace }}"
+  labels:
+    app: mlserver
+    environment: "{{ .Values.environment }}"
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8082"
+    prometheus.io/path: "/metrics"
+spec:
+  predictor:
+    serviceAccountName: "{{ .Values.serviceAccount }}"
+    model:
+      modelFormat:
+        name: mlflow
+      protocolVersion: v2
+      # Architecturally sound dynamic model artifact resolution
+      storageUri: "s3://{{ .Values.s3Bucket }}/{{ .Values.mlflowRunId }}/artifacts/model_artifacts"
+      resources:
+        requests:
+          cpu: "{{ .Values.resources.requests.cpu }}"
+          memory: "{{ .Values.resources.requests.memory }}"
+        limits:
+          cpu: "{{ .Values.resources.limits.cpu }}"
+          memory: "{{ .Values.resources.limits.memory }}"
+

@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sysctl-limits-tweak
+  namespace: kube-system
+  labels:
+    app: sysctl-limits-tweak
+spec:
+  selector:
+    matchLabels:
+      app: sysctl-limits-tweak
+  template:
+    metadata:
+      labels:
+        app: sysctl-limits-tweak
+    spec:
+      hostPID: true
+      containers:
+      - name: sysctl-tweak
+        image: busybox:latest
+        securityContext:
+          privileged: true
+        command:
+        - /bin/sh
+        - -c
+        - |
+          sysctl -w fs.inotify.max_user_watches=524288
+          sysctl -w fs.inotify.max_user_instances=512
+          echo "Updated inotify limits successfully!"
+          # Keep container alive so DaemonSet remains active
+          while true; do sleep 3600; done

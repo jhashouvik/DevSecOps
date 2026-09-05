@@ -1,0 +1,9 @@
+environment: qa
+mlflowRunId: "5388247f0c4a4d4c8811781ec0ad41ee"
+service:
+  nodePorts:
+    inference: 30100
+    metrics: 32000
+aws:
+  accessKeyId: AWS_ACCESS_KEY_ID_REDACTED_BY_SYNC
+  secretAccessKey: HfB+lVh5i0ZmoOVR5UapNBqRlyfBAmRG25APEz3Y

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: wezvatech-fraud-predictor-external
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    serving.kserve.io/inferenceservice: wezvatech-fraud-predictor
+  ports:
+    - name: http-inference
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+      nodePort: 31100  # Live Fintech prediction loop
+    - name: prometheus-metrics
+      protocol: TCP
+      port: 8082       # Maps the service port to MLServer metrics
+      targetPort: 8082 # Unpacks pod port 8082
+      nodePort: 32000  # Accessible externally on host machine port 32000
+

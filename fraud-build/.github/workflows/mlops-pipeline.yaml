@@ -1,0 +1,240 @@
+name: MLOps Main Branch Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      mlflow_tracking_uri:
+        description: 'Active K8s MLflow Tracking URI'
+        required: true
+        default: 'http://ec2-13-201-169-180.ap-south-1.compute.amazonaws.com:31000'
+        type: string
+
+env:
+  DEFAULT_TRACKING_URI: "http://ec2-13-201-169-180.ap-south-1.compute.amazonaws.com:31000"
+
+jobs:
+  security-and-quality-checks:
+    name: Shift-Left Security Scans
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Base Dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pip-audit bandit
+
+    - name: Run Software Composition Analysis (SCA)
+      run: |
+        pip-audit --format txt > sca_report.txt || echo "Vulnerabilities discovered. Bypassing for lab demo."
+
+    - name: Run Static Application Security Testing (SAST)
+      run: |
+        bandit -r train.py -f txt -o sast_report.txt || echo "Flaws discovered. Bypassing for lab demo."
+
+    - name: Upload Security Reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports
+        if-no-files-found: warn
+        path: |
+          sca_report.txt
+          sast_report.txt
+
+  train-and-track:
+    name: Immutable Model Execution & Registration
+    needs: security-and-quality-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Core Execution Dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install mlflow dvc[s3] picklescan boto3
+
+    - name: Download Security Reports
+      uses: actions/download-artifact@v4
+      with:
+        name: security-reports
+        path: .
+        merge-multiple: true
+
+    - name: Self-Initializing DVC Repository Detection & Configuration
+      run: |
+        TARGET_BUCKET="wezvatech-dvc-data-lake"
+        if [ ! -f ".dvc/config" ]; then
+          echo "⚠️ DVC configuration missing. Running first-time initialization sequence..."
+          dvc init --no-scm --force
+          dvc remote add -d my_remote s3://$TARGET_BUCKET/fraud-detection-service/ --force
+          echo "✅ First-time initialization complete."
+        else
+          echo "🎯 Valid DVC repository tracking detected. Adjusting target bucket URL..."
+          dvc remote modify my_remote url s3://$TARGET_BUCKET/fraud-detection-service/
+        fi
+
+        dvc remote modify my_remote access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        dvc remote modify my_remote secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    - name: Fetch Frozen Dataset Version via DVC
+      run: dvc pull data/fraud_data.csv.dvc
+
+    - name: Train model and track metrics
+      run: |
+        mkdir -p models
+        # 🎯 FIX: Removed --s3_bucket argument to match your clean, non-crashing train.py version
+        python train.py
+      env:
+        MLFLOW_HTTP_REQUEST_TIMEOUT: "300"
+        MLFLOW_TRACKING_URI: ${{ inputs.mlflow_tracking_uri || env.DEFAULT_TRACKING_URI }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_DEFAULT_REGION: ap-south-1
+        AWS_REGION: ap-south-1
+        GITHUB_SHA: ${{ github.sha }}
+        GITHUB_RUN_ID: ${{ github.run_id }}
+
+    - name: Intercept Supply Chain Attacks (Pickle Security Scan)
+      run: |
+        picklescan --path models/fraud_model.pkl > model_scan_report.txt || echo "Issues tracked. Bypassing for lab demo."
+
+    - name: Log Model Artifacts and Scan Reports to MLflow Dashboard via Proxy CLI
+      run: |
+        export MLFLOW_TRACKING_URI="${{ inputs.mlflow_tracking_uri || env.DEFAULT_TRACKING_URI }}"
+        
+        if [ -f mlflow_run_id.txt ]; then
+          RUN_ID=$(cat mlflow_run_id.txt)
+          echo "Targeting MLflow Server via Proxy Channel: $MLFLOW_TRACKING_URI"
+          echo "Found Active MLflow Run ID from tracking step: $RUN_ID"
+          
+          # ✅ Log Security compliance logs only. 
+          # The full model bundle (MLmodel, model.pkl) was already natively uploaded during 'python train.py'
+          mlflow artifacts log-artifact --local-file sca_report.txt --run-id $RUN_ID --artifact-path security_compliance_reports
+          mlflow artifacts log-artifact --local-file sast_report.txt --run-id $RUN_ID --artifact-path security_compliance_reports
+          mlflow artifacts log-artifact --local-file model_scan_report.txt --run-id $RUN_ID --artifact-path security_compliance_reports
+          
+          echo "🎉 Complete security artifact suite successfully pinned to active MLflow Run: $RUN_ID"
+        else
+          echo "Error: mlflow_run_id.txt file not found."
+          exit 1
+        fi
+
+    - name: Persist Tracking Identity Metadata File
+      uses: actions/upload-artifact@v4
+      with:
+        name: mlflow-tracking-id
+        path: |
+          mlflow_run_id.txt
+          mlflow_experiment_id.txt
+
+  deploy-to-qa:
+    name: GitOps Promotion to QA Environment
+    needs: train-and-track
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Application Code Base
+      uses: actions/checkout@v4
+
+    - name: Pull Target Run Metadata Context
+      uses: actions/download-artifact@v4
+      with:
+        name: mlflow-tracking-id
+        path: .
+
+    - name: Download Active MLflow Tracking Metadata Artifacts
+      run: |
+        echo "Extracting current Run ID for promotion..."
+        if [ ! -f "mlflow_run_id.txt" ]; then
+          echo "❌ Critical Error: mlflow_run_id.txt is missing!"
+          exit 1
+        fi
+        echo "MLFLOW_RUN_ID=$(cat mlflow_run_id.txt)" >> $GITHUB_ENV
+
+    - name: Checkout GitOps Deployment Target Repository
+      uses: actions/checkout@v4
+      with:
+        repository: 'wezva-fintech/fraud-deployment'
+        token: ${{ secrets.GH_PAT }}
+        path: gitops-repo
+
+    - name: Dynamically Hydrate QA Values with Credentials & Model Path
+      run: |
+        cd gitops-repo
+
+        TARGET_FILE="envs/qa/values.yaml"
+        echo "Hydrating $TARGET_FILE with active runtime environment parameters..."
+
+        yq eval '.mlflowRunId = "${{ env.MLFLOW_RUN_ID }}"' -i $TARGET_FILE
+        yq eval '.aws.accessKeyId = "${{ secrets.AWS_ACCESS_KEY_ID }}"' -i $TARGET_FILE
+        yq eval '.aws.secretAccessKey = "${{ secrets.AWS_SECRET_ACCESS_KEY }}"' -i $TARGET_FILE
+
+        echo "✅ Hydration complete. Checking structurally updated yaml topology:"
+        cat $TARGET_FILE | sed 's/accessKeyId: .*/accessKeyId: "******"/' | sed 's/secretAccessKey: .*/secretAccessKey: "******"/'
+
+    - name: Commit and Push Manifest Upgrades directly to GitOps
+      run: |
+        cd gitops-repo
+        git config --global user.name "Wezva MLOps Bot"
+        git config --global user.email "mlops-bot@wezvatech.internal"
+
+        git add envs/qa/values.yaml
+
+        git diff-index --quiet HEAD || git commit -m "mlops(cd): dynamically hydrate credentials and track run ${{ env.MLFLOW_RUN_ID }} in qa"
+
+        git push origin main
+
+  promote-to-uat:
+    name: GitOps Promotion to UAT Environment
+    needs: deploy-to-qa
+    runs-on: ubuntu-latest
+    environment: uat-environment
+    steps:
+    - name: Checkout GitOps Deployment Target Repository
+      uses: actions/checkout@v4
+      with:
+        repository: 'wezva-fintech/fraud-deployment'
+        token: ${{ secrets.GH_PAT }}
+        path: gitops-repo
+
+    - name: Promote QA Manifest State directly to UAT Staging
+      run: |
+        cd gitops-repo
+        QA_FILE="envs/qa/values.yaml"
+        UAT_FILE="envs/uat/values.yaml"
+
+        RUN_ID=$(yq eval '.mlflowRunId' $QA_FILE)
+        AWS_KEY=$(yq eval '.aws.accessKeyId' $QA_FILE)
+        AWS_SEC=$(yq eval '.aws.secretAccessKey' $QA_FILE)
+
+        # 🎯 FIX: Structural restoration of your UAT deployment changes, commit triggers, and git push transactions
+        yq eval ".models.shadow.mlflowRunId = \"$RUN_ID\"" -i $UAT_FILE
+        yq eval ".aws.accessKeyId = \"$AWS_KEY\"" -i $UAT_FILE
+        yq eval ".aws.secretAccessKey = \"$AWS_SEC\"" -i $UAT_FILE
+
+        git config --global user.name "Wezva MLOps Bot"
+        git config --global user.email "mlops-bot@wezvatech.internal"
+        
+        git add envs/uat/values.yaml
+        git diff-index --quiet HEAD || git commit -m "mlops(cd): promote run $RUN_ID to shadow deployment inside uat staging"
+        
+        git push origin main
+

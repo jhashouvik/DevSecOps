@@ -1,0 +1,16 @@
+environment: uat-shadow
+mlflowRunId: "96730b7ccaf248bf876e56f7d8e25f2e"
+service:
+  nodePorts:
+    inference: 31100 # Isolated port matrix
+    metrics: 32000
+resources:
+  requests:
+    cpu: "300m"
+    memory: "768Mi"
+aws:
+  accessKeyId: AWS_ACCESS_KEY_ID_REDACTED_BY_SYNC
+  secretAccessKey: HfB+lVh5i0ZmoOVR5UapNBqRlyfBAmRG25APEz3Y
+models:
+  shadow:
+    mlflowRunId: 5388247f0c4a4d4c8811781ec0ad41ee

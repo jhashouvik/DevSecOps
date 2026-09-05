@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whylogs-kafka-consumer
+  namespace: default
+  labels:
+    app: whylogs-kafka-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: whylogs-kafka-consumer
+  template:
+    metadata:
+      labels:
+        app: whylogs-kafka-consumer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: consumer
+        image: python:3.10-slim
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: AWS_REGION
+          value: "ap-south-1"
+        - name: AWS_ACCESS_KEY_ID
+          value: "AWS_ACCESS_KEY_ID_REDACTED_BY_SYNC"   # Replace or inject via K8s Secret
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "6uR6+3DaG9N/6ZYhe1tsFu0aXeCf8Ody9OejOc3O" # Replace or inject via K8s Secret
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          pip install kafka-python-ng whylogs pandas prometheus_client aws-msk-iam-sasl-signer-python
+          cat << 'EOF' > consumer.py
+          import json
+          import logging
+          import os
+          import sys
+          import time
+          from kafka import KafkaConsumer
+          from aws_msk_iam_sasl_signer import MSKAuthTokenProvider
+          import pandas as pd
+          import whylogs as why
+          from prometheus_client import start_http_server, Counter
+
+          logging.basicConfig(level=logging.INFO)
+
+          class MSKTokenProvider:
+              def token(self):
+                  region = os.getenv("AWS_REGION", "ap-south-1")
+                  token, _ = MSKAuthTokenProvider.generate_auth_token(region)
+                  return token
+
+          start_http_server(8000)
+          PROCESSED_EVENTS = Counter('whylogs_processed_events_total', 'Total events profiled by whylogs')
+          PROCESSED_EVENTS.inc(0)  # Forces metric instantiation with a default value of 0
+
+          KAFKA_BROKER = "boot-u2wcldmo.c2.kafka-serverless.ap-south-1.amazonaws.com:9098"
+          TOPIC = "fraud-events"
+
+          print(f"Connecting to MSK Serverless topic {TOPIC}...", flush=True)
+
+          tp = MSKTokenProvider()
+
+          consumer = KafkaConsumer(
+              TOPIC,
+              bootstrap_servers=[KAFKA_BROKER],
+              security_protocol='SASL_SSL',
+              sasl_mechanism='OAUTHBEARER',
+              sasl_oauth_token_provider=tp,
+              value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+              auto_offset_reset='earliest',
+              enable_auto_commit=True,
+              group_id='whylogs-monitoring-group-v4'
+          )
+
+          print("Consumer initialized. Reading messages...", flush=True)
+
+          batch = []
+          BATCH_SIZE = 10
+
+          for message in consumer:
+              batch.append(message.value)
+              PROCESSED_EVENTS.inc()
+
+              if len(batch) >= BATCH_SIZE:
+                  df = pd.DataFrame(batch)
+                  results = why.log(df)
+                  profile = results.profile()
+                  view = profile.view()
+                  summary = view.to_pandas()
+
+                  print("\n--- [whylogs Profile Generated] ---", flush=True)
+                  print(summary[['cardinality/est', 'counts/n', 'type']], flush=True)
+                  sys.stdout.flush()
+                  batch = []
+          EOF
+          python consumer.py
+        ports:
+        - containerPort: 8000
+          name: metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whylogs-consumer-service
+  namespace: default
+  labels:
+    app: whylogs-kafka-consumer
+spec:
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: metrics
+  selector:
+    app: whylogs-kafka-consumer

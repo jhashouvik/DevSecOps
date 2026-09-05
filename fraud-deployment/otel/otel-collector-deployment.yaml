@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      serviceAccountName: otel-collector-sa
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.95.0 # Use contrib image for Prometheus support
+          args: ["--config=/conf/otel-collector-config.yaml"]
+          volumeMounts:
+            - name: config-volume
+              mountPath: /conf
+          ports:
+            - containerPort: 8889 # Prometheus exporter port
+            - containerPort: 13133 # Health check port
+      volumes:
+        - name: config-volume
+          configMap:
+            name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-svc
+  namespace: default
+  labels:
+    app: otel-collector
+spec:
+  type: NodePort
+  ports:
+    - name: prometheus
+      port: 8889
+      targetPort: 8889
+      nodePort: 32100
+  selector:
+    app: otel-collector
+

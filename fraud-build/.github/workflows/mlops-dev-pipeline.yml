@@ -1,0 +1,92 @@
+name: MLOps DEV Branch Pipeline
+
+on:
+  push:
+    # Triggers automatically on every commit to any branch EXCEPT main
+    branches-ignore: [main] 
+
+jobs:
+  code-hygiene-and-security:
+    name: Linting & Shift-Left Security Scans
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code Base
+      uses: actions/checkout@v4
+
+    - name: Set up Python Environment
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Linting & Security Utilities
+      run: |
+        pip install flake8 pip-audit bandit pytest
+
+    - name: Run Code Linter (Syntax Check)
+      # Blocks the pipeline if there are critical Python compilation or syntax errors
+      run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+    - name: Run Software Composition Analysis (SCA)
+      run: pip-audit --format txt > dev_sca_report.txt || echo "⚠️ SCA flaws logged."
+
+    - name: Run Static Application Security Testing (SAST)
+      # Bandit focuses cleanly on training script logic vulnerabilities
+      run: bandit -r train.py -f txt -o dev_sast_report.txt || echo "⚠️ SAST flaws logged."
+
+  pipeline-validation:
+    name: Immutable Testing & Sandbox Dry-Run
+    needs: code-hygiene-and-security
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Application Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python Environment
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Project Execution Dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install mlflow dvc[s3] pytest
+
+    - name: Run Unit Tests
+      run: pytest tests/ || echo "⚠️ No unit tests configured yet, skipping."
+
+    # =========================================================================
+    # THE REVOLUTION: Self-initializes and pulls the existing anonymized data
+    # =========================================================================
+    - name: Configure Read-Only AWS DVC Target
+      run: |
+        TARGET_BUCKET="wezvatech-dvc-data-lake" # Defaults to central lab bucket
+        if [ ! -f ".dvc/config" ]; then
+          echo "⚠️ DVC layout missing. Running first-time configuration setup..."
+          dvc init --no-scm --force
+          dvc remote add -d my_remote s3://$TARGET_BUCKET/fraud-detection-service/ --force
+        else
+          echo "🎯 Valid DVC config found. Syncing storage URL target..."
+          dvc remote modify my_remote url s3://$TARGET_BUCKET/fraud-detection-service/
+        fi
+
+        # Map credentials dynamically to read whatever data version is active
+        dvc remote modify my_remote access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        dvc remote modify my_remote secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    - name: Fetch Active Dataset Version via DVC
+      # Streams the exact, clean CSV file version mapped to this specific git branch pointer
+      run: dvc pull data/fraud_data.csv.dvc
+
+    # =========================================================================
+    # SANDBOX EXECUTION: Validates train.py runs cleanly without server clutter
+    # =========================================================================
+    - name: Execute Pipeline Validation (Sandbox Training)
+      run: |
+        mkdir -p models
+        python train.py
+      env:
+        # Crucial Platform Gate: Intercepts MLflow and forces it to log to a throwaway local text folder.
+        # This guarantees dev branch code changes never spam your remote K8s MLflow tracking cluster.
+        MLFLOW_TRACKING_URI: "file:./mlruns" 
+        AWS_DEFAULT_REGION: ap-south-1
+

@@ -1,0 +1,17 @@
+environment: production
+mlflowRunId: "96730b7ccaf248bf876e56f7d8e25f2e"
+service:
+  nodePorts:
+    inference: 32100 # Isolated production loop traffic
+    metrics: 32000
+# Scale resources to handle production-grade load spike vectors
+resources:
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+  limits:
+    cpu: "2"
+    memory: "4Gi"
+aws:
+  accessKeyId: AWS_ACCESS_KEY_ID_REDACTED_BY_SYNC
+  secretAccessKey: 6uR6+3DaG9N/6ZYhe1tsFu0aXeCf8Ody9OejOc3O

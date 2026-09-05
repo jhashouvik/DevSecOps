@@ -1,0 +1,39 @@
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: fraud-prediction-gateway
+  namespace: default
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "fraud-predictor-stable.default.svc.cluster.local"
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: fraud-predictor-canary-router
+  namespace: default
+spec:
+  gateways:
+    - mesh
+    - fraud-prediction-gateway
+  hosts:
+    - "fraud-predictor-stable.default.svc.cluster.local" 
+  http:
+    - route:
+        - destination:
+            host: fraud-predictor-stable-predictor.default.svc.cluster.local
+            port:
+              number: 80
+          weight: 0
+        - destination:
+            host: fraud-predictor-shadow-predictor.default.svc.cluster.local
+            port:
+              number: 80
+          weight: 100
