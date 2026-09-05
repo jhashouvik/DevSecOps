@@ -1,0 +1,27 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: payment-service-scaler
+  namespace: demo
+spec:
+  scaleTargetRef:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: wezvagolangbootapp
+
+  minReplicaCount: 1
+  maxReplicaCount: 20
+
+  triggers:
+    - type: apache-kafka
+      metadata:
+        bootstrapServers: boot-ohzzzkgo.c2.kafka-serverless.ap-south-1.amazonaws.com:9098
+        topic: payments
+        consumerGroup: payment-processors
+        lagThreshold: "10"
+        sasl: aws_msk_iam
+        tls: enable
+        awsRegion: ap-south-1
+
+      authenticationRef:
+        name: aws-msk-auth

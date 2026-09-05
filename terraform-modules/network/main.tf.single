@@ -1,0 +1,67 @@
+#---------------------------------------------#
+# Author: Adam WezvaTechnologies
+# Call/Whatsapp: +91-9739110917
+#---------------------------------------------#
+provider "aws" {
+  region = "ap-south-1"
+}
+
+module "vpc" {
+  source = "./network"
+
+  # REQUIRED: This is used for your Name tags (fintech-dev-vpc, etc.)
+  vpc_name = "dev"
+
+  vpc_cidr = "10.0.0.0/16"
+
+  # Public Security Group Rules
+  sg_public_ingress = [
+    {
+      description = "Allows SSH access"
+      port        = 22
+      protocol    = "tcp"
+    },
+    {
+      description = "Allows HTTP traffic"
+      port        = 80
+      protocol    = "tcp"
+    }
+  ]
+
+  sg_public_egress = [443]
+
+  # Subnet Configuration
+  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+  private_subnets = ["10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24"]
+
+  # Private Security Group Rules
+  sg_private_ingress = [8080, 2049]
+  sg_private_egress  = [443]
+
+  # VPC Endpoints
+  # Note: ensure 'private_dns' is included if your module's for_each uses it
+  vpc_endpoints = {
+    s3 = { 
+      service     = "s3", 
+      type        = "Gateway", 
+      private_dns = false 
+    }
+    ecr_api = { 
+      service     = "ecr.api", 
+      type        = "Interface", 
+      private_dns = true 
+    }
+  }
+
+  enable_nat_gateway = true
+}
+
+# Output the VPC ID for easy reference
+output "vpc_id" {
+  value = module.vpc.vpc_id
+}
+
+#---------------------------------------------#
+# Author: Adam WezvaTechnologies
+# Call/Whatsapp: +91-9739110917
+#---------------------------------------------#

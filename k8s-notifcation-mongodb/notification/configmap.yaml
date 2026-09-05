@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wezvanodejscm
+  namespace: demo
+data:
+  kafka_brokers: kafka-cluster-kafka-bootstrap.kafka:9098
+  kafka_topic: notification
+  kafka_consumer_group: node-group
+
+  mongodb_host: wezvatechdev.tautdjz.mongodb.net
+  mongodb_database: dev_db

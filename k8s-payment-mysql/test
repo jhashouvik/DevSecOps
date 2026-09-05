@@ -1,0 +1,72 @@
+kind: Rollout
+apiVersion: argoproj.io/v1alpha1
+metadata:
+  name: wezvagolangbootapp
+  labels:
+    app.kubernetes.io/name: wezvagolangbootapp
+spec:
+  replicas: 5
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: wezvagolangbootapp
+  strategy:
+    canary:
+      stableService: wezvagolang-stablesvc
+      canaryService: wezvagolang-canarysvc
+      steps:
+        - setWeight: 20
+        - pause: { }
+        - setWeight: 50
+        - pause:
+            duration: 60s
+        - setWeight: 100
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: wezvagolangbootapp
+    spec:
+      imagePullSecrets:
+        - name: ecr-secret
+      containers:
+        - name: main
+          image: 081654307023.dkr.ecr.ap-south-1.amazonaws.com/wezvatechpayment:rel40
+          resources: {}
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: password
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: host
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: wezvagolangcm
+                  key: dbname
+          ports:
+            - containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5

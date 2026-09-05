@@ -1,0 +1,14 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: aws-msk-auth
+  namespace: demo
+spec:
+  secretTargetRef:
+    - parameter: awsAccessKeyID
+      name: keda-aws-msk-credentials
+      key: AWS_ACCESS_KEY_ID
+
+    - parameter: awsSecretAccessKey
+      name: keda-aws-msk-credentials
+      key: AWS_SECRET_ACCESS_KEY
