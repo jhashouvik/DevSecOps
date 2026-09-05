@@ -1,0 +1,37 @@
+# =========================================================================
+# Wezva Technologies - MLOps Platform Engineering Framework
+# Component: Multi-Namespace Enterprise ApplicationSet Generator
+# =========================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: fraud-predictor-environments
+  namespace: argocd # Must be in the same namespace as Argo CD
+spec:
+  generators:
+  - git:
+      repoURL: https://github.com/wezva-fintech/fraud-deployment.git
+      revision: HEAD
+      directories:
+      - path: envs/*
+  template:
+    metadata:
+      name: 'fraud-app-{{path.basename}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/wezva-fintech/fraud-deployment.git
+        targetRevision: main
+        path: mlchart
+        helm:
+          valueFiles:
+           - '../envs/{{path.basename}}/values.yaml'
+      destination:
+        server: https://kubernetes.default.svc # Your target cluster API server URL
+        namespace: '{{path.basename}}' # Target namespace for deployment
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

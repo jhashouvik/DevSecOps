@@ -1,0 +1,102 @@
+apiVersion: "serving.kserve.io/v1beta1"
+kind: "InferenceService"
+metadata:
+  name: "fraud-predictor-stable"
+  namespace: default
+spec:
+  predictor:
+    serviceAccountName: sa-s3-access
+    labels:
+      app: mlserver
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8082"
+      prometheus.io/path: "/metrics"
+    model:
+      modelFormat:
+        name: mlflow
+      protocolVersion: v2
+      storageUri: "s3://wezvatech-fraud-model/2/models/m-efd1bf3d93b0449a9da52127c4aea0b9/artifacts"
+      env:
+        - name: NEO4J_URI
+          valueFrom:
+            configMapKeyRef:
+              name: wezvamlopscm
+              key: neo4j_host
+        - name: NEO4J_USER
+          valueFrom:
+            configMapKeyRef:
+              name: wezvamlopscm
+              key: neo4j_user
+        - name: NEO4J_PASSWORD
+          valueFrom:
+            configMapKeyRef:
+              name: wezvamlopscm
+              key: neo4j_passwd
+        - name: KAFKA_BROKERS
+          valueFrom:
+            configMapKeyRef:
+              name: wezvamlopscm
+              key: kafka_brokers
+        - name: KAFKA_TOPIC
+          valueFrom:
+            configMapKeyRef:
+              name: wezvamlopscm
+              key: kafka_topic
+        - name: KAFKA_CONSUMER_GROUP
+          valueFrom:
+            configMapKeyRef:
+              name: wezvamlopscm
+              key: kafka_consumer_group
+        - name: VALKEY_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: wezvamlopscm
+              key: VALKEY_HOST
+        - name: VALKEY_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: wezvamlopscm
+              key: VALKEY_PORT
+        - name: VALKEY_DB
+          valueFrom:
+            configMapKeyRef:
+              name: wezvamlopscm
+              key: VALKEY_DB
+        - name: VALKEY_TLS_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: wezvamlopscm
+              key: VALKEY_TLS_ENABLED
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wezvamlopscm
+  namespace: default
+data:
+  # Neo4j (Uses internal FQDN pointing to the ExternalName service)
+  neo4j_host: "bolt://neo4j-svc.default.svc.cluster.local:7687"
+  neo4j_user: "neo4j"
+  neo4j_passwd: "YourSecurePassword123"
+
+  # Kafka
+  kafka_brokers: "kafka-cluster-kafka-bootstrap.kafka:9098"
+  kafka_topic: "fraud"
+  kafka_consumer_group: "python-group"
+
+  # Valkey
+  VALKEY_HOST: "valkey-primary.demo.svc.cluster.local"
+  VALKEY_PORT: "6379"
+  VALKEY_DB: "0"
+  VALKEY_TLS_ENABLED: "false"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j-svc
+  namespace: default
+spec:
+  type: ExternalName
+  externalName: wezvatechdev-neo4j-nlb-1234567890.elb.us-east-1.amazonaws.com
+

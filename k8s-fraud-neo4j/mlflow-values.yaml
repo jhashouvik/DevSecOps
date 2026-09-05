@@ -1,0 +1,33 @@
+backendStore:
+  databaseMigration: true
+  databaseConnectionCheck: true
+  postgres:
+    enabled: true
+    host: "mlflow-db-postgresql.default.svc.cluster.local"
+    port: 5432
+    database: "mlflow"
+    user: "postgres"
+    password: "mlflowsecretpass"
+
+# 2. Storage Connection (AWS S3 Model Artifact Store)
+artifactRoot:
+  s3:
+    enabled: true
+    bucket: "wezvatech-fraud-model"
+  proxiedArtifactStorage: true
+
+# 3. Inject AWS Environment Variables into MLflow Pods (Using Object Syntax)
+extraEnvVars:
+  AWS_ACCESS_KEY_ID: "AWS_ACCESS_KEY_ID_REDACTED_BY_SYNC"
+  AWS_SECRET_ACCESS_KEY: "AWS_SECRET_ACCESS_KEY_REDACTED_BY_SYNC"
+  AWS_DEFAULT_REGION: "ap-south-1"
+
+# 4. EXPOSE VIA NODEPORT SPECIFICALLY FORMATTED FOR THE SCHEMA
+service:
+  type: NodePort
+  port: 5000
+
+# 5. ALLOW KIND CLUSTER HOST TO SERVE MLFLOW
+extraArgs:
+  host: "0.0.0.0"
+  allowed-hosts: "*"

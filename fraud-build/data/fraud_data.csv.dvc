@@ -1,0 +1,5 @@
+outs:
+- md5: f0be0ce178e2ef279fbbb7eabf9a012b
+  size: 911999
+  hash: md5
+  path: fraud_data.csv

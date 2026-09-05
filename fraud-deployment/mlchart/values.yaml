@@ -1,0 +1,32 @@
+# =========================================================================
+# Wezva Technologies - MLOps Platform Engineering Framework
+# Component: Central Helm values schema for multi-environment tracking
+# =========================================================================
+
+modelName: wezvatech-fraud-predictor
+serviceAccount: sa-s3-access
+s3Bucket: wezvatech-fraud-model
+mlflowRunId: default-run-id  # Overridden dynamically by ArgoCD during promotion
+environment: dev             # Set to qa, uat-shadow, or production per namespace
+
+# Secure Placeholders: Populated via CI secrets or secret injection plugins
+aws:
+  accessKeyId: "REPLACE_ME_IN_CI"
+  secretAccessKey: "REPLACE_ME_IN_CI"
+  region: "ap-south-1"
+
+# Service Layer Networking Configurations
+service:
+  nodePorts:
+    inference: 31100         # Overridden to unique ports per namespace to avoid conflicts
+    metrics: 32000           # Overridden to unique ports per namespace to avoid conflicts
+
+# Computational Resource Constraints
+resources:
+  requests:
+    cpu: "200m"
+    memory: "512Mi"
+  limits:
+    cpu: "1"
+    memory: "1Gi"
+

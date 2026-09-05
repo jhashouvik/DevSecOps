@@ -1,0 +1,27 @@
+apiVersion: "serving.kserve.io/v1beta1"
+kind: "InferenceService"
+metadata:
+  name: "sklearn-iris"
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: sklearn
+      storageUri: "gs://kfserving-examples/models/sklearn/1.0/model"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sklearn-iris-external
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    serving.kserve.io/inferenceservice: sklearn-iris
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080
+      nodePort: 31100
+

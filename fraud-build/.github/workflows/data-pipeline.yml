@@ -1,0 +1,99 @@
+name: 🛢️ On-Demand Data Engineering & DVC Pipeline
+
+on:
+  # Manual on-demand invocation across any branch. Completely free of fixed cron schedules.
+  workflow_dispatch:
+    inputs:
+      s3_bucket_name:
+        description: 'Target AWS S3 Data Lake Bucket Name'
+        required: true
+        default: 'wezvatech-dvc-data-lake'
+        type: string
+
+permissions:
+  contents: write # Essential: Grants permission to commit the updated pointer back to the calling branch
+
+jobs:
+  data-ingestion-and-compliance:
+    name: Ingest, Redact PII & Stream to Shared Data Lake
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Active Reference Branch
+      uses: actions/checkout@v4
+      with:
+        # Clones the exact branch (dev, main, or bugfix) that triggered this manual run
+        ref: ${{ github.ref_name }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Python Environment
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Data, DVC & Compliance Tools
+      run: |
+        pip install pandas numpy dvc[s3]
+
+    # =========================================================================
+    # SELF-INITIALIZING STEP: Runs dynamically per runner lifetime, maps URLs
+    # =========================================================================
+    - name: Self-Initializing DVC Repository Detection & Configuration
+      run: |
+        TARGET_BUCKET="${{ inputs.s3_bucket_name }}"
+        if [ ! -f ".dvc/config" ]; then
+          echo "⚠️ DVC configuration missing. Running first-time initialization sequence..."
+          dvc init --no-scm --force
+          dvc remote add -d my_remote s3://$TARGET_BUCKET/fraud-detection-service/ --force
+          echo "✅ First-time initialization complete."
+        else
+          echo "🎯 Valid DVC repository tracking detected. Adjusting target bucket URL..."
+          dvc remote modify my_remote url s3://$TARGET_BUCKET/fraud-detection-service/
+        fi
+
+        # Always append active runtime storage access credentials
+        dvc remote modify my_remote access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        dvc remote modify my_remote secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    # =========================================================================
+    # STEP 1 & 2: UPSTREAM DATA PRIVACY & PRE-STORAGE AUDITING GATES
+    # =========================================================================
+    - name: Execute Data Extraction & Core PII Anonymization
+      # Runs your Python script which strips text names, hashes IDs, and masks accounts
+      run: python generate_data.py # Outputs: data/fraud_data.csv
+
+    - name: Audit Local Dataset for Accidental PII Leaks
+      run: |
+        echo "Scanning data/fraud_data.csv for unhashed uppercase structural identity patterns..."
+        
+        # FIXED: Changing filter to uppercase [A-Z] prevents lowercase sha256 tokens from causing false positives
+        if grep -E -q -w "[A-Z]{5}[0-9]{4}[A-Z]{1}" data/fraud_data.csv; then
+          echo "❌ CRITICAL: Raw plain-text uppercase identity formats found in output file! Blocking storage push to protect data lake."
+          exit 1
+        else
+          echo "✅ Audit gate passed. Zero unhashed raw identities discovered. Proceeding to DVC capture."
+        fi
+
+    # =========================================================================
+    # STEP 3 & 4: VERSION LOCKING & CONTENT-ADDRESSED S3 ROUTING
+    # =========================================================================
+    - name: Lock Clean Data Version with DVC
+      run: dvc add data/fraud_data.csv --force # Creates/updates data/fraud_data.csv.dvc pointer
+
+    - name: Push Safe Data Chunks to Amazon S3
+      # Uploads data blocks to the shared storage layer using content-based checksums
+      run: dvc push 
+
+    - name: Automatically Sync Updated DVC Pointer back to Active Branch
+      # Commits the metadata tracker ONLY back into the branch that triggered this run
+      run: |
+        git config --global user.name "Wezva Data Compliance Bot"
+        git config --global user.email "data-compliance@wezvatech.com"
+        git add data/fraud_data.csv.dvc
+        
+        if ! git diff --staged --quiet; then
+          echo "🎯 New dataset hash detected. Committing pointer directly to branch: ${{ github.ref_name }}"
+          git commit -m "data: [manual run on ${{ github.ref_name }}] locked fresh redacted dataset version"
+          git push origin ${{ github.ref_name }}
+        else
+          echo "No dataset adjustments detected. Skipping Git tracking commit."
+        fi
