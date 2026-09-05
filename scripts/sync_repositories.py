@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -133,7 +134,94 @@ def run_git(command: list[str], cwd: Path | None = None) -> None:
     )
 
 
-def sync_repository(repository: dict) -> None:
+# Source repositories belong to other teams and sometimes contain literal
+# credentials. GitHub push protection rejects the aggregator push when those
+# values reach a commit here, so mirrored content is scrubbed before it is
+# written into the destination tree.
+
+MAX_SCAN_BYTES = 5 * 1024 * 1024
+
+REDACTION_RULES = [
+    (
+        "aws-access-key-id",
+        re.compile(r"(?<![A-Z0-9])(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}(?![A-Z0-9])"),
+        "AWS_ACCESS_KEY_ID_REDACTED_BY_SYNC",
+    ),
+    (
+        "aws-secret-access-key",
+        re.compile(
+            r"(?i)(aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*[\"']?)"
+            r"[A-Za-z0-9/+=]{40}"
+        ),
+        r"\1AWS_SECRET_ACCESS_KEY_REDACTED_BY_SYNC",
+    ),
+    (
+        "github-token",
+        re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b"),
+        "GITHUB_TOKEN_REDACTED_BY_SYNC",
+    ),
+    (
+        "github-fine-grained-token",
+        re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b"),
+        "GITHUB_TOKEN_REDACTED_BY_SYNC",
+    ),
+    (
+        "private-key-block",
+        re.compile(
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
+            r".*?"
+            r"-----END [A-Z ]*PRIVATE KEY-----",
+            re.DOTALL,
+        ),
+        "PRIVATE_KEY_REDACTED_BY_SYNC",
+    ),
+]
+
+
+def redact_tree(root: Path) -> dict[str, int]:
+    totals: dict[str, int] = {}
+
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+
+        try:
+            if path.stat().st_size > MAX_SCAN_BYTES:
+                continue
+            raw = path.read_bytes()
+        except OSError as exc:
+            print(f"WARN unreadable during redaction: {path}: {exc}")
+            continue
+
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            # Binary payload. Nothing to scrub textually.
+            continue
+
+        redacted = text
+        hits: dict[str, int] = {}
+
+        for rule, pattern, replacement in REDACTION_RULES:
+            redacted, count = pattern.subn(replacement, redacted)
+            if count:
+                hits[rule] = count
+
+        if not hits:
+            continue
+
+        path.write_bytes(redacted.encode("utf-8"))
+
+        detail = ", ".join(f"{r} x{c}" for r, c in sorted(hits.items()))
+        print(f"REDACT {root.name}/{path.relative_to(root).as_posix()}: {detail}")
+
+        for rule, count in hits.items():
+            totals[rule] = totals.get(rule, 0) + count
+
+    return totals
+
+
+def sync_repository(repository: dict) -> dict[str, int]:
     name = repository["name"]
     destination = ROOT_DIR / name
 
@@ -177,7 +265,11 @@ def sync_repository(repository: dict) -> None:
             symlinks=False,
         )
 
+    redactions = redact_tree(destination)
+
     print(f"DONE: {repository['full_name']}")
+
+    return redactions
 
 
 def main() -> None:
@@ -203,6 +295,7 @@ def main() -> None:
     synced = 0
     skipped = 0
     failed = 0
+    redactions: dict[str, int] = {}
 
     for repository in repositories:
         full_name = repository["full_name"].lower()
@@ -218,7 +311,8 @@ def main() -> None:
             continue
 
         try:
-            sync_repository(repository)
+            for rule, count in sync_repository(repository).items():
+                redactions[rule] = redactions.get(rule, 0) + count
             synced += 1
         except Exception as exc:
             failed += 1
@@ -232,6 +326,13 @@ def main() -> None:
         f"Summary: discovered={len(repositories)}, "
         f"synced={synced}, skipped={skipped}, failed={failed}"
     )
+
+    if redactions:
+        detail = ", ".join(f"{r}={c}" for r, c in sorted(redactions.items()))
+        print(f"Secrets redacted before commit: {detail}")
+    else:
+        print("Secrets redacted before commit: none")
+
     print("=" * 80)
 
     if failed:
