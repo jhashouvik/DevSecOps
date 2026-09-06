@@ -6,20 +6,19 @@ on:
       - main
 
 jobs:
-  validate-source-branch:
+  validate-source:
     name: Validate source branch
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check source branch
+      - name: Allow only DEV to MAIN
         run: |
           echo "Source branch: ${{ github.head_ref }}"
           echo "Target branch: ${{ github.base_ref }}"
 
           if [ "${{ github.head_ref }}" != "dev" ]; then
-            echo "❌ Only DEV branch is allowed to merge into MAIN."
-            echo "Current source branch: ${{ github.head_ref }}"
+            echo "Only the dev branch is allowed to merge into main."
             exit 1
           fi
 
-          echo "✅ DEV is allowed to merge into MAIN."
+          echo "DEV → MAIN validation passed."
