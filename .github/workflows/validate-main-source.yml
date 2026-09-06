@@ -1,0 +1,24 @@
+name: Validate Main Source
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate-source:
+    name: Validate source branch
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Allow only DEV to MAIN
+        run: |
+          echo "Source branch: ${{ github.head_ref }}"
+          echo "Target branch: ${{ github.base_ref }}"
+
+          if [ "${{ github.head_ref }}" != "dev" ]; then
+            echo "Only the dev branch is allowed to merge into main."
+            exit 1
+          fi
+
+          echo "DEV → MAIN validation passed."
