@@ -6,7 +6,7 @@ on:
   push:
     paths:
       - 'demo/**'
-      - '.github/workflows/demo.yml'
+      - '.github/workflows/iac_pipeline.yml'
     branches:
       - dev
 
