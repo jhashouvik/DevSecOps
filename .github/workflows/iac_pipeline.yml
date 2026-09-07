@@ -9,7 +9,6 @@ on:
       - '.github/workflows/iac_pipeline.yml'
     branches:
       - dev
-      - VM-Deploy-Test
 
 jobs:
   terraform-efs: 
