@@ -5,8 +5,8 @@ on:
   
   push:
     paths:
-      - 'demo/**'
-      - '.github/workflows/demo.yml'
+      - 'terraform-modules/demo/**'
+      - '.github/workflows/iac_pipeline.yml'
     branches:
       - dev
 
@@ -16,7 +16,7 @@ jobs:
 
     defaults:
       run: 
-        working-directory: demo
+        working-directory: terraform-modules/demo
 
     steps:
       # -------------------
