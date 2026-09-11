@@ -33,6 +33,13 @@ Concurrent runs are serialized, and Terraform also uses S3 state locking.
    `product-name/envs/prod/s3.tfstate.tflock`. A backend using a customer-managed
    KMS key also needs the appropriate KMS permissions.
 5. Review the bucket names in `main.tf`. S3 bucket names must be globally unique.
+   The names now include the authenticated AWS account ID and deployment region
+   to reduce collisions, for example `wezvatech-dvc-data-lake-123456789012-ap-south-1`.
+   No additional GitHub secret is needed for the account ID. These names remain
+   stable across runs in the same account and region; availability is checked by
+   AWS during creation. Update any IAM policies scoped to the old bucket names.
+   When deploying `comprehend-PII-gateway`, pass the resulting data lake bucket name
+   as `raw_ingestion_bucket_id`; its default still uses the original name.
    Existing buckets must already be tracked in this Terraform state or be imported
    before deployment. Changing the backend path creates a different state location;
    use state migration if this infrastructure is already managed elsewhere.
