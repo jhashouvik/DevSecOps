@@ -15,8 +15,11 @@ Concurrent runs are serialized, and Terraform also uses S3 state locking.
    These are the same credential names used by the existing IAC pipeline.
    This workflow uses access-key credentials without a session token.
    `AWS_REGION` is set to `ap-south-1` in the workflow and is not a secret.
-3. Ensure `wezvatech-2026-tfstate` already exists in `ap-south-1`, in the intended
-   AWS account. Terraform's backend cannot create its own state bucket during
+3. Ensure `wezvatech-s3-2026-tfstate` already exists in the intended
+   AWS account. Confirm its region under S3 **Properties** and set `region` in
+   `backend.tf` to match (currently `ap-south-1`). The state bucket region can
+   differ from the deployment region in `main.tf`.
+   Terraform's backend cannot create its own state bucket during
    initialization. If using a different state bucket, update `backend.tf` and
    the workflow's `head-bucket` check together. Enable versioning on the state
    bucket to allow recovery of earlier state versions.
