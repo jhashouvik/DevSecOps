@@ -2,17 +2,33 @@ name: IAC Pipeline
 
 on:
   workflow_dispatch:
-  
-  push:
-    paths:
-      - 'terraform-modules/demo/**'
-      - '.github/workflows/iac_pipeline.yml'
-    branches:
-      - dev
+    inputs:
+      action:
+        description: Preview (plan), deploy (apply), or delete managed resources (destroy)
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-demo
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: 'false'
 
 jobs:
-  terraform-efs: 
+  terraform-demo:
+    name: Terraform demo (${{ inputs.action }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     defaults:
       run: 
@@ -27,6 +43,8 @@ jobs:
 
       - name: setup terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
               
       - name: config aws credential
         uses: aws-actions/configure-aws-credentials@v4
@@ -36,10 +54,10 @@ jobs:
           aws-region: ap-south-1 
 
       - name: terraform init
-        run: terraform init
+        run: terraform init -input=false
 
       - name: terraform validate
-        run: terraform validate
+        run: terraform validate -no-color
 
       - name: Install Checkov
         run: |
@@ -50,13 +68,17 @@ jobs:
         run: checkov -d . --soft-fail
 
       - name: terraform plan
-        run: terraform plan
+        if: inputs.action != 'destroy'
+        run: terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
 
       - name: terraform apply
-        run: terraform apply -auto-approve
+        if: inputs.action == 'apply'
+        run: terraform apply -input=false -no-color -lock-timeout=5m tfplan
 
-      - name: Wait for 10 seconds
-        run: sleep 10
+      - name: terraform destroy plan
+        if: inputs.action == 'destroy'
+        run: terraform plan -destroy -input=false -no-color -lock-timeout=5m -out=destroy.tfplan
 
       - name: terraform destroy
-        run: terraform destroy -auto-approve
+        if: inputs.action == 'destroy'
+        run: terraform apply -input=false -no-color -lock-timeout=5m destroy.tfplan
