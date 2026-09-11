@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: Preview changes (plan) or deploy them (apply)
+        description: Preview (plan), deploy (apply), or delete managed resources (destroy)
         required: true
         default: plan
         type: choice
         options:
           - plan
           - apply
+          - destroy
 
 permissions:
   contents: read
@@ -62,7 +63,16 @@ jobs:
         run: terraform validate -no-color
 
       - name: Plan S3 changes
+        if: inputs.action != 'destroy'
         run: terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+
+      - name: Plan S3 destruction
+        if: inputs.action == 'destroy'
+        run: terraform plan -destroy -input=false -no-color -lock-timeout=5m -out=destroy.tfplan
+
+      - name: Destroy S3 resources
+        if: inputs.action == 'destroy'
+        run: terraform apply -input=false -no-color -lock-timeout=5m destroy.tfplan
 
       - name: Apply S3 changes
         if: inputs.action == 'apply'

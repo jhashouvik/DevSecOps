@@ -2,7 +2,8 @@
 
 The workflow `.github/workflows/s3-deploy.yml` deploys this directory into the AWS
 account belonging to the configured credentials, in `ap-south-1` (Mumbai).
-It runs manually and supports `plan` (preview only) and `apply` (deployment).
+It runs manually and supports `plan` (preview only), `apply` (deployment), and
+`destroy` (delete resources managed by this Terraform state).
 Concurrent runs are serialized, and Terraform also uses S3 state locking.
 
 ## One-time setup
@@ -53,6 +54,23 @@ Concurrent runs are serialized, and Terraform also uses S3 state locking.
    exact saved plan. It does not reuse the earlier preview; intervening changes
    to code or AWS resources can change the result.
 4. Read **Show deployed bucket ARNs** for the resulting bucket identifiers.
+
+## Destroy the deployed buckets
+
+Open **Actions > Deploy S3 > Run workflow**, select the branch with the same
+backend used for deployment, and choose `destroy`. This selection authorizes
+deletion: the run creates a destroy plan and immediately applies that saved plan.
+There is no additional approval pause between the two steps.
+
+Destroy targets all resources managed in this S3 Terraform state, including the
+two application buckets and their versioning/lifecycle configuration. The separate
+`wezvatech-s3-2027-tfstate` backend bucket is not managed by this module and remains.
+The application buckets must be empty, including all object versions and delete
+markers. The workflow does not empty them or enable `force_destroy`; nonempty
+buckets can cause destruction to fail after some configuration resources have
+already been removed. Only empty a bucket if its data is intended for permanent
+deletion, then rerun `destroy`. The AWS identity needs permission to delete the
+managed buckets and their configuration.
 
 The workflow installs Terraform 1.10.5, which supports the backend's native S3
 lock file. It does not automatically run on pushes or destroy resources after
