@@ -17,7 +17,7 @@ Concurrent runs are serialized, and Terraform also uses S3 state locking.
    `AWS_REGION` is set to `ap-south-1` in the workflow and is not a secret.
 3. Ensure `wezvatech-s3-2027-tfstate` already exists in the intended
    AWS account. Confirm its region under S3 **Properties** and set `region` in
-   `backend.tf` to match (currently `ap-south-2`). The state bucket region can
+   `backend.tf` to match (currently `ap-south-1`). The state bucket region can
    differ from the deployment region in `main.tf`.
    Terraform's backend cannot create its own state bucket during
    initialization. If using a different state bucket, update `backend.tf` and

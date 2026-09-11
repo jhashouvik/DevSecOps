@@ -2,7 +2,7 @@ terraform {
   backend "s3" {
     bucket         = "wezvatech-s3-2027-tfstate"
     key            = "product-name/envs/prod/s3.tfstate"
-    region         = "ap-south-2"
+    region         = "ap-south-1"
     encrypt        = true
     
     # Enable new native locking
