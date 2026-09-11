@@ -2,7 +2,8 @@
 
 The workflow `.github/workflows/s3-deploy.yml` deploys this directory into the AWS
 account belonging to the configured credentials, in `ap-south-1` (Mumbai).
-It runs manually and supports `plan` (preview only) and `apply` (deployment).
+It runs manually and supports `plan` (preview only), `apply` (deployment), and
+`destroy` (delete resources managed by this Terraform state).
 Concurrent runs are serialized, and Terraform also uses S3 state locking.
 
 ## One-time setup
@@ -15,8 +16,11 @@ Concurrent runs are serialized, and Terraform also uses S3 state locking.
    These are the same credential names used by the existing IAC pipeline.
    This workflow uses access-key credentials without a session token.
    `AWS_REGION` is set to `ap-south-1` in the workflow and is not a secret.
-3. Ensure `wezvatech-2026-tfstate` already exists in `ap-south-1`, in the intended
-   AWS account. Terraform's backend cannot create its own state bucket during
+3. Ensure `wezvatech-s3-2027-tfstate` already exists in the intended
+   AWS account. Confirm its region under S3 **Properties** and set `region` in
+   `backend.tf` to match (currently `ap-south-1`). The state bucket region can
+   differ from the deployment region in `main.tf`.
+   Terraform's backend cannot create its own state bucket during
    initialization. If using a different state bucket, update `backend.tf` and
    the workflow's `head-bucket` check together. Enable versioning on the state
    bucket to allow recovery of earlier state versions.
@@ -30,6 +34,13 @@ Concurrent runs are serialized, and Terraform also uses S3 state locking.
    `product-name/envs/prod/s3.tfstate.tflock`. A backend using a customer-managed
    KMS key also needs the appropriate KMS permissions.
 5. Review the bucket names in `main.tf`. S3 bucket names must be globally unique.
+   The names now include the authenticated AWS account ID and deployment region
+   to reduce collisions, for example `wezvatech-dvc-data-lake-123456789012-ap-south-1`.
+   No additional GitHub secret is needed for the account ID. These names remain
+   stable across runs in the same account and region; availability is checked by
+   AWS during creation. Update any IAM policies scoped to the old bucket names.
+   When deploying `comprehend-PII-gateway`, pass the resulting data lake bucket name
+   as `raw_ingestion_bucket_id`; its default still uses the original name.
    Existing buckets must already be tracked in this Terraform state or be imported
    before deployment. Changing the backend path creates a different state location;
    use state migration if this infrastructure is already managed elsewhere.
@@ -43,6 +54,23 @@ Concurrent runs are serialized, and Terraform also uses S3 state locking.
    exact saved plan. It does not reuse the earlier preview; intervening changes
    to code or AWS resources can change the result.
 4. Read **Show deployed bucket ARNs** for the resulting bucket identifiers.
+
+## Destroy the deployed buckets
+
+Open **Actions > Deploy S3 > Run workflow**, select the branch with the same
+backend used for deployment, and choose `destroy`. This selection authorizes
+deletion: the run creates a destroy plan and immediately applies that saved plan.
+There is no additional approval pause between the two steps.
+
+Destroy targets all resources managed in this S3 Terraform state, including the
+two application buckets and their versioning/lifecycle configuration. The separate
+`wezvatech-s3-2027-tfstate` backend bucket is not managed by this module and remains.
+The application buckets must be empty, including all object versions and delete
+markers. The workflow does not empty them or enable `force_destroy`; nonempty
+buckets can cause destruction to fail after some configuration resources have
+already been removed. Only empty a bucket if its data is intended for permanent
+deletion, then rerun `destroy`. The AWS identity needs permission to delete the
+managed buckets and their configuration.
 
 The workflow installs Terraform 1.10.5, which supports the backend's native S3
 lock file. It does not automatically run on pushes or destroy resources after

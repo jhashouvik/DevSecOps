@@ -1,0 +1,95 @@
+name: S3_State bucket
+
+on:
+  workflow_dispatch:
+    inputs:
+      bucket_name:
+        description: Select the state bucket to create or manage
+        required: true
+        default: wezvatech-s3-2027-tfstate
+        type: choice
+        options:
+          - wezvatech-s3-2027-tfstate
+          - state-backup-file
+          - shouvik-dev-tfstate-637616607637
+      aws_region:
+        description: State bucket region (must match if it already exists)
+        required: true
+        default: ap-south-1
+        type: string
+      action:
+        description: Preview or create/update the state bucket
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s3-state-${{ inputs.bucket_name }}
+  cancel-in-progress: false
+
+jobs:
+  state-bucket:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: terraform-modules/s3_state
+    env:
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      TF_VAR_bucket_name: ${{ inputs.bucket_name }}
+      TF_VAR_aws_region: ${{ inputs.aws_region }}
+      STATE_ACTION: ${{ inputs.action }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          python3 - <<'PY'
+          import os, re
+          name = os.environ['TF_VAR_bucket_name']
+          region = os.environ['TF_VAR_aws_region']
+          if not (3 <= len(name) <= 63 and re.fullmatch(r'[a-z0-9][a-z0-9-]*[a-z0-9]', name)):
+              raise SystemExit('Bucket name must be 3-63 lowercase letters, digits, or hyphens.')
+          if not re.fullmatch(r'[a-z]{2}(-[a-z]+)+-[0-9]+', region):
+              raise SystemExit('Invalid AWS region format.')
+          PY
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Show target AWS account
+        run: aws sts get-caller-identity
+
+      - name: Bootstrap or update state bucket
+        run: bash bootstrap.sh
+
+      - name: Preserve local bootstrap state if the run fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-state-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            terraform-modules/s3_state/terraform.tfstate
+            terraform-modules/s3_state/terraform.tfstate.backup
+            terraform-modules/s3_state/errored.tfstate
+          if-no-files-found: ignore
+          retention-days: 7
