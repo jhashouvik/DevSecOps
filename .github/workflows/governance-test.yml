@@ -108,6 +108,7 @@ jobs:
           MATCHES=0
           for attempt in $(seq 1 12); do
             MATCHES=$(aws logs filter-log-events \
+              --no-paginate \
               --log-group-name "$LOG_GROUP" \
               --start-time "$START_TIME_MS" \
               --filter-pattern "\"s3://${BUCKET}/${RAW_KEY}\"" \
