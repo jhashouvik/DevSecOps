@@ -64,7 +64,7 @@ jobs:
         run: aws sts get-caller-identity
 
       - name: Check existing state bucket
-        run: aws s3api head-bucket --bucket wezvatech-2026-tfstate
+        run: aws s3api head-bucket --bucket wezvatech-s3-2027-tfstate
 
       - name: Initialize Terraform
         run: terraform init -input=false
@@ -123,7 +123,7 @@ jobs:
         run: aws sts get-caller-identity
 
       - name: Check existing state bucket
-        run: aws s3api head-bucket --bucket wezvatech-2026-tfstate
+        run: aws s3api head-bucket --bucket wezvatech-s3-2027-tfstate
 
       - name: Initialize Terraform
         run: terraform init -input=false
