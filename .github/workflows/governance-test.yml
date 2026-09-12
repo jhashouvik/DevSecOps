@@ -1,0 +1,191 @@
+name: Test Macie & Comprehend Governance
+
+on:
+  workflow_dispatch:
+    inputs:
+      raw_ingestion_bucket_id:
+        description: Data lake bucket name the governance pipeline was deployed against
+        required: true
+        type: string
+      environment:
+        description: Environment prefix used at deploy time (matches the Terraform "environment" variable)
+        required: true
+        default: production
+        type: string
+      test_comprehend:
+        description: Upload a test file and verify the PII gateway redacts it exactly once
+        required: true
+        default: true
+        type: boolean
+      test_macie:
+        description: Run a one-time Macie classification job and verify it finds PII
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-governance-test
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  BUCKET: ${{ inputs.raw_ingestion_bucket_id }}
+
+jobs:
+  test:
+    name: Test Governance Pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Show target AWS account
+        run: aws sts get-caller-identity
+
+      - name: Set run tag
+        run: echo "RUN_TAG=${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
+
+      # ---------------------------------------------------------------------
+      # Comprehend PII Gateway: upload under raw/, confirm exactly one
+      # redacted copy appears under processed/, and confirm the Lambda did
+      # not retrigger itself (the recursion bug this pipeline was fixed for).
+      # ---------------------------------------------------------------------
+      - name: "Comprehend: upload raw test object"
+        if: inputs.test_comprehend
+        run: |
+          RAW_KEY="raw/pii_test-${RUN_TAG}.csv"
+          echo "RAW_KEY=${RAW_KEY}" >> "$GITHUB_ENV"
+          echo "PROCESSED_KEY=processed/pii_test-${RUN_TAG}.csv" >> "$GITHUB_ENV"
+          echo "START_TIME_MS=$(($(date +%s) * 1000))" >> "$GITHUB_ENV"
+          aws s3 cp terraform-modules/comprehend-PII-gateway/pii_test.csv "s3://${BUCKET}/${RAW_KEY}"
+          echo "Uploaded s3://${BUCKET}/${RAW_KEY}"
+
+      - name: "Comprehend: wait for redacted output"
+        if: inputs.test_comprehend
+        run: |
+          for attempt in $(seq 1 18); do
+            if aws s3api head-object --bucket "$BUCKET" --key "$PROCESSED_KEY" >/dev/null 2>&1; then
+              echo "Found processed object after ${attempt} attempt(s)."
+              exit 0
+            fi
+            echo "Attempt ${attempt}: processed object not ready yet, waiting 5s..."
+            sleep 5
+          done
+          echo "::error::Timed out waiting for s3://${BUCKET}/${PROCESSED_KEY}. Check the Lambda's CloudWatch logs."
+          exit 1
+
+      - name: "Comprehend: verify PII was redacted"
+        if: inputs.test_comprehend
+        run: |
+          aws s3 cp "s3://${BUCKET}/${PROCESSED_KEY}" processed_output.csv
+          echo "--- processed output ---"
+          cat processed_output.csv
+          if grep -q "REDACTED" processed_output.csv && ! grep -qE "@wezvatech\.internal|\+91-9739110917" processed_output.csv; then
+            echo "PASS: PII fixture values were redacted."
+          else
+            echo "::error::Processed object still contains raw PII, or no redaction markers were found."
+            exit 1
+          fi
+
+      - name: "Comprehend: verify no self-retrigger loop"
+        if: inputs.test_comprehend
+        run: |
+          LOG_GROUP="/aws/lambda/${{ inputs.environment }}-central-pii-gateway-worker"
+          MATCHES=$(aws logs filter-log-events \
+            --log-group-name "$LOG_GROUP" \
+            --start-time "$START_TIME_MS" \
+            --filter-pattern "\"s3://${BUCKET}/${RAW_KEY}\"" \
+            --query 'length(events)' --output text 2>/dev/null || echo "0")
+          echo "Matching invocation log lines for ${RAW_KEY}: ${MATCHES}"
+          if [ "$MATCHES" -eq 1 ]; then
+            echo "PASS: exactly one invocation processed the raw object."
+          else
+            echo "::error::Expected exactly 1 invocation for ${RAW_KEY}, found ${MATCHES}. This may indicate a retrigger loop."
+            exit 1
+          fi
+
+      - name: "Comprehend: clean up test objects"
+        if: always() && inputs.test_comprehend
+        run: |
+          aws s3 rm "s3://${BUCKET}/${RAW_KEY}" || true
+          aws s3 rm "s3://${BUCKET}/${PROCESSED_KEY}" || true
+
+      # ---------------------------------------------------------------------
+      # Macie: upload an unredacted copy under a prefix the PII gateway does
+      # not watch, run a scoped one-time classification job, and confirm it
+      # reports findings.
+      # ---------------------------------------------------------------------
+      - name: "Macie: upload unredacted test object"
+        if: inputs.test_macie
+        run: |
+          MACIE_KEY="macie-test/pii_test-${RUN_TAG}.csv"
+          echo "MACIE_KEY=${MACIE_KEY}" >> "$GITHUB_ENV"
+          aws s3 cp terraform-modules/comprehend-PII-gateway/pii_test.csv "s3://${BUCKET}/${MACIE_KEY}"
+          echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_ENV"
+
+      - name: "Macie: run scoped one-time classification job"
+        if: inputs.test_macie
+        run: |
+          JOB_DEF=$(jq -n --arg acct "$ACCOUNT_ID" --arg bucket "$BUCKET" '{
+            bucketDefinitions: [{accountId: $acct, buckets: [$bucket]}],
+            scoping: {includes: {and: [{simpleScopeTerm: {comparator: "STARTS_WITH", key: "OBJECT_KEY", values: ["macie-test/"]}}]}}
+          }')
+          JOB_ID=$(aws macie2 create-classification-job \
+            --job-type ONE_TIME \
+            --name "governance-test-${RUN_TAG}" \
+            --s3-job-definition "$JOB_DEF" \
+            --query jobId --output text)
+          echo "JOB_ID=${JOB_ID}" >> "$GITHUB_ENV"
+          echo "Started Macie classification job ${JOB_ID}"
+
+      - name: "Macie: wait for job completion"
+        if: inputs.test_macie
+        run: |
+          for attempt in $(seq 1 40); do
+            STATUS=$(aws macie2 describe-classification-job --job-id "$JOB_ID" --query jobStatus --output text)
+            echo "Attempt ${attempt}: job status is ${STATUS}"
+            if [ "$STATUS" = "COMPLETE" ]; then
+              exit 0
+            fi
+            if [ "$STATUS" = "CANCELLED" ] || [ "$STATUS" = "USER_PAUSED" ]; then
+              echo "::error::Classification job ended in unexpected status ${STATUS}"
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "::error::Timed out waiting for Macie job ${JOB_ID} to complete."
+          exit 1
+
+      - name: "Macie: verify findings were reported"
+        if: inputs.test_macie
+        run: |
+          FINDING_CRITERIA=$(jq -n --arg jobid "$JOB_ID" '{criterion: {"classificationDetails.jobId": {eq: [$jobid]}}}')
+          FINDING_IDS=$(aws macie2 list-findings \
+            --finding-criteria "$FINDING_CRITERIA" \
+            --query 'findingIds' --output text)
+          if [ -z "$FINDING_IDS" ]; then
+            echo "::error::No Macie findings were reported for job ${JOB_ID}, but the test fixture contains PII."
+            exit 1
+          fi
+          echo "PASS: Macie reported findings: ${FINDING_IDS}"
+          aws macie2 get-findings --finding-ids $FINDING_IDS \
+            --query 'findings[].{Type:type,Severity:severity.description,Bucket:resourcesAffected.s3Bucket.name}' \
+            --output table
+
+      - name: "Macie: clean up test object"
+        if: always() && inputs.test_macie
+        run: aws s3 rm "s3://${BUCKET}/${MACIE_KEY}" || true

@@ -12,7 +12,6 @@ variable "environment" {
 
 variable "security_team_email" {
   type        = string
-  description = "The destination email address to receive immediate PII leak alerts"
-  default     = "your-real-email@yourcompany.com" # 🎯 CHANGE THIS to your real email address
+  description = "The destination email address to receive immediate PII leak alerts. The SNS subscription requires manual confirmation via the email AWS sends on first apply."
 }
 
