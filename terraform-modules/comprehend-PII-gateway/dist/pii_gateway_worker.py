@@ -20,17 +20,28 @@ REDACTION_MASKS = {
     "AWS_ACCESS_KEY": "[REDACTED_KEY]"
 }
 
+RAW_PREFIX = "raw/"
+PROCESSED_PREFIX = "processed/"
+
 def lambda_handler(event, context):
     # 1. Parse the incoming real-time S3 notification event record
     try:
         record = event['Records'][0]
         bucket_name = record['s3']['bucket']['name']
         object_key = urllib.parse.unquote_plus(record['s3']['object']['key'])
-        
+
         print(f"⚡ Real-Time Ingest Capture: Processing object s3://{bucket_name}/{object_key}")
     except Exception as parse_err:
         print(f"❌ Failed to parse inbound S3 Event schema: {str(parse_err)}")
         return {"statusCode": 400, "body": "Invalid event metadata wrapper"}
+
+    # Defense in depth: the bucket notification is filtered to RAW_PREFIX, but if that
+    # ever drifts, refuse to process our own output so we can't retrigger ourselves.
+    if not object_key.startswith(RAW_PREFIX):
+        print(f"⏭️ Skipping s3://{bucket_name}/{object_key}: outside {RAW_PREFIX}, not a raw upload")
+        return {"statusCode": 200, "body": "Ignored: not a raw ingestion object"}
+
+    output_key = PROCESSED_PREFIX + object_key[len(RAW_PREFIX):]
 
     # 2. Fetch the raw dataset stream from S3 into execution memory
     response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
@@ -64,13 +75,14 @@ def lambda_handler(event, context):
         mask = REDACTION_MASKS.get(ent_type, "[REDACTED_PII]")
         redacted_text = redacted_text[:begin] + mask + redacted_text[end:]
 
-    # 5. Overwrite the file with the sanitized text payload
+    # 5. Write the sanitized payload to the processed prefix, never back onto the raw
+    #    object, so the write does not itself match the raw-ingestion trigger.
     s3_client.put_object(
         Bucket=bucket_name,
-        Key=object_key,
+        Key=output_key,
         Body=redacted_text.encode('utf-8')
     )
 
-    print(f"✅ Success: s3://{bucket_name}/{object_key} has been sanitized by central gateway.")
+    print(f"✅ Success: s3://{bucket_name}/{output_key} has been sanitized by central gateway.")
     return {"statusCode": 200, "body": "Sanitisation complete"}
 

@@ -83,13 +83,16 @@ resource "aws_lambda_permission" "allow_s3_trigger" {
 }
 
 # 5. THE REAL-TIME TRIGGER: Hook S3 file uploads directly to the Lambda gateway worker
+# Scoped to the raw/ prefix only. The Lambda writes its sanitized output under processed/,
+# so the trigger and the Lambda's own write never overlap (avoids a self-retriggering loop).
 resource "aws_s3_bucket_notification" "bucket_notification" {
   bucket = var.raw_ingestion_bucket_id
 
   lambda_function {
     lambda_function_arn = aws_lambda_function.redaction_lambda.arn
-    events              = ["s3:ObjectCreated:*"] 
-    filter_suffix       = ".csv"                 
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "raw/"
+    filter_suffix       = ".csv"
   }
 
   depends_on = [aws_lambda_permission.allow_s3_trigger]

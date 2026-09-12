@@ -1,3 +1,6 @@
-id,amount,customer_name,email,phone_number
-1,150.00,Adam M,adam.m@wezvatech.internal,+91-9739110917
-2,420.50,Ajitha G,ajitha.g@wezvatech.internal,+1-555-0234
+id,transaction_date,amount,customer_name,email,phone_number,card_number,support_notes
+1,2026-01-14,150.00,Adam M,adam.m@wezvatech.internal,+91-9739110917,4111111111111111,Customer confirmed refund over email, case closed.
+2,2026-01-15,420.50,Ajitha G,ajitha.g@wezvatech.internal,+1-555-0234,5555555555554444,Called twice about a duplicate billing charge.
+3,2026-01-16,89.99,Daniel Keane,daniel.k@wezvatech.internal,+44-7911-123456,378282246310005,Escalated to L2 support for a failed payment retry.
+4,2026-01-17,1250.00,Priya Ramesh,priya.r@wezvatech.internal,+91-9822012345,6011111111111117,Dev pasted AWS key AKIAIOSFODNN7EXAMPLE into the ticket comment by mistake, needs scrubbing.
+5,2026-01-18,60.00,Maria Sanchez,maria.s@wezvatech.internal,+34-611223344,4111111111111111,No issues reported, ticket closed same day.

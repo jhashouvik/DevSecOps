@@ -1,0 +1,148 @@
+name: Deploy Macie & Comprehend Governance
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Preview (plan), deploy (apply), or delete managed resources (destroy)
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      security_team_email:
+        description: Destination email for Macie security alerts (requires SNS subscription confirmation on first apply)
+        required: true
+        type: string
+      raw_ingestion_bucket_id:
+        description: Data lake bucket name from the S3 pipeline's "Show deployed bucket ARNs" output (e.g. wezvatech-dvc-data-lake-<account_id>-ap-south-1)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-governance-production
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: 'false'
+  AWS_REGION: ap-south-1
+
+jobs:
+  macie:
+    name: Terraform Macie (${{ inputs.action }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: terraform-modules/macie-compliance
+    env:
+      TF_VAR_security_team_email: ${{ inputs.security_team_email }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Show target AWS account
+        run: aws sts get-caller-identity
+
+      - name: Check existing state bucket
+        run: aws s3api head-bucket --bucket wezvatech-2026-tfstate
+
+      - name: Initialize Terraform
+        run: terraform init -input=false
+
+      - name: Validate Terraform
+        run: terraform validate -no-color
+
+      - name: Plan Macie changes
+        if: inputs.action != 'destroy'
+        run: terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+
+      - name: Plan Macie destruction
+        if: inputs.action == 'destroy'
+        run: terraform plan -destroy -input=false -no-color -lock-timeout=5m -out=destroy.tfplan
+
+      - name: Destroy Macie resources
+        if: inputs.action == 'destroy'
+        run: terraform apply -input=false -no-color -lock-timeout=5m destroy.tfplan
+
+      - name: Apply Macie changes
+        if: inputs.action == 'apply'
+        run: terraform apply -input=false -no-color -lock-timeout=5m tfplan
+
+      - name: Show SNS alert topic ARN
+        if: inputs.action == 'apply'
+        run: terraform output -no-color sns_topic_arn
+
+  comprehend:
+    name: Terraform Comprehend PII Gateway (${{ inputs.action }})
+    needs: macie
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: terraform-modules/comprehend-PII-gateway
+    env:
+      TF_VAR_raw_ingestion_bucket_id: ${{ inputs.raw_ingestion_bucket_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Show target AWS account
+        run: aws sts get-caller-identity
+
+      - name: Check existing state bucket
+        run: aws s3api head-bucket --bucket wezvatech-2026-tfstate
+
+      - name: Initialize Terraform
+        run: terraform init -input=false
+
+      - name: Validate Terraform
+        run: terraform validate -no-color
+
+      - name: Plan Comprehend PII Gateway changes
+        if: inputs.action != 'destroy'
+        run: terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
+
+      - name: Plan Comprehend PII Gateway destruction
+        if: inputs.action == 'destroy'
+        run: terraform plan -destroy -input=false -no-color -lock-timeout=5m -out=destroy.tfplan
+
+      - name: Destroy Comprehend PII Gateway resources
+        if: inputs.action == 'destroy'
+        run: terraform apply -input=false -no-color -lock-timeout=5m destroy.tfplan
+
+      - name: Apply Comprehend PII Gateway changes
+        if: inputs.action == 'apply'
+        run: terraform apply -input=false -no-color -lock-timeout=5m tfplan
