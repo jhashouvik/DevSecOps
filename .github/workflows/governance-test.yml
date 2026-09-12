@@ -105,16 +105,26 @@ jobs:
         if: inputs.test_comprehend
         run: |
           LOG_GROUP="/aws/lambda/${{ inputs.environment }}-central-pii-gateway-worker"
-          MATCHES=$(aws logs filter-log-events \
-            --log-group-name "$LOG_GROUP" \
-            --start-time "$START_TIME_MS" \
-            --filter-pattern "\"s3://${BUCKET}/${RAW_KEY}\"" \
-            --query 'length(events)' --output text 2>/dev/null || echo "0")
-          echo "Matching invocation log lines for ${RAW_KEY}: ${MATCHES}"
+          MATCHES=0
+          for attempt in $(seq 1 12); do
+            MATCHES=$(aws logs filter-log-events \
+              --log-group-name "$LOG_GROUP" \
+              --start-time "$START_TIME_MS" \
+              --filter-pattern "\"s3://${BUCKET}/${RAW_KEY}\"" \
+              --query 'length(events)' --output text 2>/dev/null || echo "0")
+            echo "Attempt ${attempt}: matching invocation log lines for ${RAW_KEY}: ${MATCHES}"
+            if [ "$MATCHES" -ge 1 ]; then
+              break
+            fi
+            sleep 5
+          done
           if [ "$MATCHES" -eq 1 ]; then
             echo "PASS: exactly one invocation processed the raw object."
+          elif [ "$MATCHES" -eq 0 ]; then
+            echo "::error::No invocation log found for ${RAW_KEY} after retries. Either CloudWatch Logs is still indexing, or LOG_GROUP=${LOG_GROUP} doesn't match your deployed function name (check the 'environment' input matches what you deployed with)."
+            exit 1
           else
-            echo "::error::Expected exactly 1 invocation for ${RAW_KEY}, found ${MATCHES}. This may indicate a retrigger loop."
+            echo "::error::Expected exactly 1 invocation for ${RAW_KEY}, found ${MATCHES}. This indicates a retrigger loop."
             exit 1
           fi
 
