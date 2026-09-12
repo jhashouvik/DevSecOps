@@ -12,8 +12,14 @@ variable "environment" {
 
 variable "raw_ingestion_bucket_id" {
   type        = string
-  description = "The central S3 ingestion bucket name monitored for real-time dataset uploads"
-  default     = "wezvatech-dvc-data-lake" # 🎯 CHANGE to match your central data lake bucket name
+  description = <<-EOT
+    The central S3 ingestion bucket monitored for real-time dataset uploads.
+    Must match the data lake bucket deployed by terraform-modules/s3 (see that
+    module's `deployed_infrastructure_storage_arns` output), for example
+    wezvatech-dvc-data-lake-<account_id>-ap-south-1.
+    Only uploads under the "raw/" prefix trigger the gateway; the Lambda writes
+    sanitized output under "processed/" in the same bucket.
+  EOT
 }
 
 variable "lambda_timeout_seconds" {
