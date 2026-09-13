@@ -38,13 +38,17 @@ jobs:
   test:
     name: Test Governance Pipeline
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Normalize inputs
+        run: |
+          echo "BUCKET=$(echo -n "$BUCKET" | xargs)" >> "$GITHUB_ENV"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -132,24 +136,63 @@ jobs:
       - name: "Comprehend: clean up test objects"
         if: always() && inputs.test_comprehend
         run: |
+          # Keep the redacted result in S3 so it can be inspected after the run.
+          # Always remove the unmasked input from this test.
           aws s3 rm "s3://${BUCKET}/${RAW_KEY}" || true
-          aws s3 rm "s3://${BUCKET}/${PROCESSED_KEY}" || true
+          echo "Retained redacted output at s3://${BUCKET}/${PROCESSED_KEY}"
 
       # ---------------------------------------------------------------------
       # Macie: upload an unredacted copy under a prefix the PII gateway does
       # not watch, run a scoped one-time classification job, and confirm it
       # reports findings.
       # ---------------------------------------------------------------------
-      - name: "Macie: upload unredacted test object"
+      - name: "Macie: ensure fixture object exists"
+        id: macie_fixture
         if: inputs.test_macie
         run: |
-          MACIE_KEY="macie-test/pii_test-${RUN_TAG}.csv"
+          # Macie maintains its own per-bucket object inventory that refreshes on
+          # a daily cycle (see "Scope options for sensitive data discovery jobs"
+          # in the Macie user guide), not in real time. A classification job
+          # scoped to this bucket only sees objects already in that inventory.
+          # A brand-new object created moments ago will show 0 classifiable
+          # objects regardless of how long we sleep in this same run. So we use
+          # one STABLE, persistent fixture key instead of a fresh key per run:
+          # once it's been through Macie's inventory refresh (allow up to ~24h
+          # after first upload), later runs keep scanning this same known
+          # object and should complete reliably from then on. We deliberately
+          # never re-upload/delete it, so its LastModified stays stable.
+          MACIE_KEY="macie-test/pii_fixture.csv"
           echo "MACIE_KEY=${MACIE_KEY}" >> "$GITHUB_ENV"
-          aws s3 cp terraform-modules/comprehend-PII-gateway/pii_test.csv "s3://${BUCKET}/${MACIE_KEY}"
           echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_ENV"
+          if aws s3api head-object --bucket "$BUCKET" --key "$MACIE_KEY" >/dev/null 2>&1; then
+            echo "Fixture already exists at s3://${BUCKET}/${MACIE_KEY} - leaving it untouched."
+            BUCKET_INFO=$(aws macie2 describe-buckets \
+              --criteria "{\"bucketName\":{\"eq\":[\"${BUCKET}\"]}}" \
+              --output json)
+            CLASSIFIABLE_OBJECTS=$(echo "$BUCKET_INFO" | jq -r '.buckets[0].classifiableObjectCount // 0')
+            if [ "$CLASSIFIABLE_OBJECTS" -gt 0 ]; then
+              echo "Macie reports ${CLASSIFIABLE_OBJECTS} classifiable object(s) in ${BUCKET}."
+              echo "ready=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning::The fixture exists, but Macie has not added a classifiable object to its inventory yet."
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              {
+                echo "### Macie test pending"
+                echo "The fixture exists, but Macie's S3 inventory has no classifiable objects for this bucket yet. Re-run after the inventory refresh, potentially within 24 hours."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "::warning::Fixture didn't exist yet, uploading it now. Macie's inventory refresh can take up to ~24h before a classification job can see it. Run this workflow again after the fixture appears in Macie's bucket inventory."
+            aws s3 cp terraform-modules/comprehend-PII-gateway/pii_test.csv "s3://${BUCKET}/${MACIE_KEY}"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Macie test pending"
+              echo "The fixture was uploaded during this run and is waiting for Macie's S3 inventory refresh. Re-run this workflow after the refresh, potentially within 24 hours."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: "Macie: run scoped one-time classification job"
-        if: inputs.test_macie
+        if: inputs.test_macie && steps.macie_fixture.outputs.ready == 'true'
         run: |
           JOB_DEF=$(jq -n --arg acct "$ACCOUNT_ID" --arg bucket "$BUCKET" '{
             bucketDefinitions: [{accountId: $acct, buckets: [$bucket]}],
@@ -164,9 +207,12 @@ jobs:
           echo "Started Macie classification job ${JOB_ID}"
 
       - name: "Macie: wait for job completion"
-        if: inputs.test_macie
+        if: inputs.test_macie && steps.macie_fixture.outputs.ready == 'true'
         run: |
-          for attempt in $(seq 1 40); do
+          # The first classification job in a new account/region can take well over
+          # 10 minutes while AWS provisions the Macie scanning backend; later runs
+          # are typically much faster. 100 attempts * 15s = up to 25 minutes.
+          for attempt in $(seq 1 100); do
             STATUS=$(aws macie2 describe-classification-job --job-id "$JOB_ID" --query jobStatus --output text)
             echo "Attempt ${attempt}: job status is ${STATUS}"
             if [ "$STATUS" = "COMPLETE" ]; then
@@ -181,15 +227,39 @@ jobs:
           echo "::error::Timed out waiting for Macie job ${JOB_ID} to complete."
           exit 1
 
+      - name: "Macie: inspect job run details"
+        if: inputs.test_macie && steps.macie_fixture.outputs.ready == 'true'
+        run: |
+          aws macie2 describe-classification-job --job-id "$JOB_ID" --output json | tee job_details.json
+          echo "--- summary ---"
+          echo "lastRunErrorStatus: $(jq -r '.lastRunErrorStatus.code // "UNKNOWN"' job_details.json)"
+          echo "statistics: $(jq -c '.statistics // {}' job_details.json)"
+          echo "--- object being scanned ---"
+          aws s3api head-object --bucket "$BUCKET" --key "$MACIE_KEY" --output json || echo "::warning::Could not head-object $MACIE_KEY"
+          # Note: statistics.approximateNumberOfObjectsToProcess is REMAINING work
+          # for the current run, not a total-scanned count - it is always 0 once
+          # jobStatus is COMPLETE, whether or not anything was actually found. It
+          # is not useful as a pass/fail signal here, so we don't gate on it.
+
       - name: "Macie: verify findings were reported"
-        if: inputs.test_macie
+        if: inputs.test_macie && steps.macie_fixture.outputs.ready == 'true'
         run: |
           FINDING_CRITERIA=$(jq -n --arg jobid "$JOB_ID" '{criterion: {"classificationDetails.jobId": {eq: [$jobid]}}}')
-          FINDING_IDS=$(aws macie2 list-findings \
-            --finding-criteria "$FINDING_CRITERIA" \
-            --query 'findingIds' --output text)
+          FINDING_IDS=""
+          # Findings can take a few minutes to be published even after the job
+          # itself reports COMPLETE, so poll rather than checking once.
+          for attempt in $(seq 1 20); do
+            FINDING_IDS=$(aws macie2 list-findings \
+              --finding-criteria "$FINDING_CRITERIA" \
+              --query 'findingIds' --output text)
+            echo "Attempt ${attempt}: findings so far: ${FINDING_IDS:-<none>}"
+            if [ -n "$FINDING_IDS" ]; then
+              break
+            fi
+            sleep 15
+          done
           if [ -z "$FINDING_IDS" ]; then
-            echo "::error::No Macie findings were reported for job ${JOB_ID}, but the test fixture contains PII."
+            echo "::error::No Macie findings were reported for job ${JOB_ID} after polling. Confirm that Macie reports the target bucket as classifiable and that macie-test/pii_fixture.csv was present before the inventory refresh. If the fixture was uploaded recently, wait for the inventory refresh and re-run this workflow."
             exit 1
           fi
           echo "PASS: Macie reported findings: ${FINDING_IDS}"
@@ -197,6 +267,8 @@ jobs:
             --query 'findings[].{Type:type,Severity:severity.description,Bucket:resourcesAffected.s3Bucket.name}' \
             --output table
 
-      - name: "Macie: clean up test object"
-        if: always() && inputs.test_macie
-        run: aws s3 rm "s3://${BUCKET}/${MACIE_KEY}" || true
+      # No cleanup step for the Macie fixture: it's intentionally left in place
+      # (s3://<bucket>/macie-test/pii_fixture.csv) so it stays in Macie's
+      # inventory and future runs don't have to wait through another
+      # inventory-refresh cycle. If you need to remove it, use the "Empty S3
+      # Bucket" workflow or delete it manually.
