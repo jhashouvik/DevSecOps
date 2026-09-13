@@ -46,6 +46,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Normalize inputs
+        run: |
+          echo "BUCKET=$(echo -n "$BUCKET" | xargs)" >> "$GITHUB_ENV"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
