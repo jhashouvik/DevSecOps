@@ -188,11 +188,21 @@ jobs:
         if: inputs.test_macie
         run: |
           FINDING_CRITERIA=$(jq -n --arg jobid "$JOB_ID" '{criterion: {"classificationDetails.jobId": {eq: [$jobid]}}}')
-          FINDING_IDS=$(aws macie2 list-findings \
-            --finding-criteria "$FINDING_CRITERIA" \
-            --query 'findingIds' --output text)
+          FINDING_IDS=""
+          # Findings can take a few minutes to be published even after the job
+          # itself reports COMPLETE, so poll rather than checking once.
+          for attempt in $(seq 1 20); do
+            FINDING_IDS=$(aws macie2 list-findings \
+              --finding-criteria "$FINDING_CRITERIA" \
+              --query 'findingIds' --output text)
+            echo "Attempt ${attempt}: findings so far: ${FINDING_IDS:-<none>}"
+            if [ -n "$FINDING_IDS" ]; then
+              break
+            fi
+            sleep 15
+          done
           if [ -z "$FINDING_IDS" ]; then
-            echo "::error::No Macie findings were reported for job ${JOB_ID}, but the test fixture contains PII."
+            echo "::error::No Macie findings were reported for job ${JOB_ID} after polling, but the test fixture contains PII."
             exit 1
           fi
           echo "PASS: Macie reported findings: ${FINDING_IDS}"
