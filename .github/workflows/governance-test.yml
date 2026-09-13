@@ -188,6 +188,16 @@ jobs:
           echo "::error::Timed out waiting for Macie job ${JOB_ID} to complete."
           exit 1
 
+      - name: "Macie: inspect job run details"
+        if: inputs.test_macie
+        run: |
+          aws macie2 describe-classification-job --job-id "$JOB_ID" --output json | tee job_details.json
+          echo "--- summary ---"
+          echo "lastRunErrorStatus: $(jq -r '.lastRunErrorStatus.code // "UNKNOWN"' job_details.json)"
+          echo "statistics: $(jq -c '.statistics // {}' job_details.json)"
+          echo "--- object being scanned ---"
+          aws s3api head-object --bucket "$BUCKET" --key "$MACIE_KEY" --output json || echo "::warning::Could not head-object $MACIE_KEY (may already be cleaned up)"
+
       - name: "Macie: verify findings were reported"
         if: inputs.test_macie
         run: |
