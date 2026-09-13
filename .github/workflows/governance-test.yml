@@ -145,6 +145,7 @@ jobs:
       # reports findings.
       # ---------------------------------------------------------------------
       - name: "Macie: ensure fixture object exists"
+        id: macie_fixture
         if: inputs.test_macie
         run: |
           # Macie maintains its own per-bucket object inventory that refreshes on
@@ -163,19 +164,34 @@ jobs:
           echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_ENV"
           if aws s3api head-object --bucket "$BUCKET" --key "$MACIE_KEY" >/dev/null 2>&1; then
             echo "Fixture already exists at s3://${BUCKET}/${MACIE_KEY} - leaving it untouched."
+            BUCKET_INFO=$(aws macie2 describe-buckets \
+              --criteria "{\"bucketName\":{\"eq\":[\"${BUCKET}\"]}}" \
+              --output json)
+            CLASSIFIABLE_OBJECTS=$(echo "$BUCKET_INFO" | jq -r '.buckets[0].classifiableObjectCount // 0')
+            if [ "$CLASSIFIABLE_OBJECTS" -gt 0 ]; then
+              echo "Macie reports ${CLASSIFIABLE_OBJECTS} classifiable object(s) in ${BUCKET}."
+              echo "ready=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning::The fixture exists, but Macie has not added a classifiable object to its inventory yet."
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              {
+                echo "### Macie test pending"
+                echo "The fixture exists, but Macie's S3 inventory has no classifiable objects for this bucket yet. Re-run after the inventory refresh, potentially within 24 hours."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
           else
             echo "::warning::Fixture didn't exist yet, uploading it now. Macie's inventory refresh can take up to ~24h before a classification job can see it. Run this workflow again after the fixture appears in Macie's bucket inventory."
             aws s3 cp terraform-modules/comprehend-PII-gateway/pii_test.csv "s3://${BUCKET}/${MACIE_KEY}"
-            echo "MACIE_FIXTURE_NEW=true" >> "$GITHUB_ENV"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Macie test pending"
+              echo "The fixture was uploaded during this run and is waiting for Macie's S3 inventory refresh. Re-run this workflow after the refresh, potentially within 24 hours."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: "Macie: run scoped one-time classification job"
-        if: inputs.test_macie
+        if: inputs.test_macie && steps.macie_fixture.outputs.ready == 'true'
         run: |
-          if [ "${MACIE_FIXTURE_NEW:-false}" = "true" ]; then
-            echo "::error::The Macie fixture was uploaded during this run and is not ready for classification yet. Macie refreshes its S3 inventory asynchronously, potentially taking up to 24 hours. Re-run this workflow after the inventory refresh; the Comprehend test (if enabled) has already run independently."
-            exit 1
-          fi
           JOB_DEF=$(jq -n --arg acct "$ACCOUNT_ID" --arg bucket "$BUCKET" '{
             bucketDefinitions: [{accountId: $acct, buckets: [$bucket]}],
             scoping: {includes: {and: [{simpleScopeTerm: {comparator: "STARTS_WITH", key: "OBJECT_KEY", values: ["macie-test/"]}}]}}
@@ -189,7 +205,7 @@ jobs:
           echo "Started Macie classification job ${JOB_ID}"
 
       - name: "Macie: wait for job completion"
-        if: inputs.test_macie
+        if: inputs.test_macie && steps.macie_fixture.outputs.ready == 'true'
         run: |
           # The first classification job in a new account/region can take well over
           # 10 minutes while AWS provisions the Macie scanning backend; later runs
@@ -210,7 +226,7 @@ jobs:
           exit 1
 
       - name: "Macie: inspect job run details"
-        if: inputs.test_macie
+        if: inputs.test_macie && steps.macie_fixture.outputs.ready == 'true'
         run: |
           aws macie2 describe-classification-job --job-id "$JOB_ID" --output json | tee job_details.json
           echo "--- summary ---"
@@ -224,7 +240,7 @@ jobs:
           # is not useful as a pass/fail signal here, so we don't gate on it.
 
       - name: "Macie: verify findings were reported"
-        if: inputs.test_macie
+        if: inputs.test_macie && steps.macie_fixture.outputs.ready == 'true'
         run: |
           FINDING_CRITERIA=$(jq -n --arg jobid "$JOB_ID" '{criterion: {"classificationDetails.jobId": {eq: [$jobid]}}}')
           FINDING_IDS=""
