@@ -1,0 +1,107 @@
+name: Empty S3 Bucket
+
+on:
+  workflow_dispatch:
+    inputs:
+      bucket_name:
+        description: Exact name of the bucket to permanently empty (all object versions and delete markers)
+        required: true
+        type: string
+      confirm_bucket_name:
+        description: Re-type the exact bucket name to confirm permanent, irreversible deletion of all its object versions
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: s3-empty-bucket-${{ inputs.bucket_name }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  empty-bucket:
+    name: Empty ${{ inputs.bucket_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Confirm bucket name matches
+        run: |
+          if [ "${{ inputs.bucket_name }}" != "${{ inputs.confirm_bucket_name }}" ]; then
+            echo "::error::bucket_name and confirm_bucket_name do not match. Refusing to proceed."
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Show target AWS account
+        run: aws sts get-caller-identity
+
+      - name: Verify bucket exists
+        run: aws s3api head-bucket --bucket "${{ inputs.bucket_name }}"
+
+      - name: Permanently delete all object versions and delete markers
+        run: |
+          BUCKET="${{ inputs.bucket_name }}"
+          KEY_MARKER=""
+          VERSION_MARKER=""
+          TOTAL_DELETED=0
+          PAGE=0
+
+          while : ; do
+            PAGE=$((PAGE + 1))
+            ARGS=(--bucket "$BUCKET" --no-paginate --output json)
+            if [ -n "$KEY_MARKER" ]; then
+              ARGS+=(--key-marker "$KEY_MARKER")
+            fi
+            if [ -n "$VERSION_MARKER" ]; then
+              ARGS+=(--version-id-marker "$VERSION_MARKER")
+            fi
+
+            RESPONSE=$(aws s3api list-object-versions "${ARGS[@]}")
+
+            DELETE_PAYLOAD=$(echo "$RESPONSE" | jq '{
+              Objects: ((.Versions // []) + (.DeleteMarkers // [])) | map({Key: .Key, VersionId: .VersionId}),
+              Quiet: true
+            }')
+            COUNT=$(echo "$DELETE_PAYLOAD" | jq '.Objects | length')
+
+            echo "Page ${PAGE}: found ${COUNT} version(s)/delete marker(s)."
+
+            if [ "$COUNT" -gt 0 ]; then
+              echo "$DELETE_PAYLOAD" > delete_batch.json
+              aws s3api delete-objects --bucket "$BUCKET" --delete file://delete_batch.json >/dev/null
+              TOTAL_DELETED=$((TOTAL_DELETED + COUNT))
+            fi
+
+            IS_TRUNCATED=$(echo "$RESPONSE" | jq -r '.IsTruncated // false')
+            if [ "$IS_TRUNCATED" != "true" ]; then
+              break
+            fi
+            KEY_MARKER=$(echo "$RESPONSE" | jq -r '.NextKeyMarker // empty')
+            VERSION_MARKER=$(echo "$RESPONSE" | jq -r '.NextVersionIdMarker // empty')
+          done
+
+          echo "Deleted ${TOTAL_DELETED} total object version(s)/delete marker(s) from s3://${BUCKET}"
+
+      - name: Verify bucket is now empty
+        run: |
+          BUCKET="${{ inputs.bucket_name }}"
+          REMAINING=$(aws s3api list-object-versions --bucket "$BUCKET" --no-paginate --output json \
+            | jq '((.Versions // []) + (.DeleteMarkers // [])) | length')
+          echo "Remaining object versions/delete markers: ${REMAINING}"
+          if [ "$REMAINING" -ne 0 ]; then
+            echo "::error::Bucket still has ${REMAINING} version(s) left. Re-run this workflow."
+            exit 1
+          fi
+          echo "PASS: s3://${BUCKET} is now fully empty and ready for 'terraform destroy'."
