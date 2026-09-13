@@ -38,7 +38,7 @@ jobs:
   test:
     name: Test Governance Pipeline
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -166,7 +166,10 @@ jobs:
       - name: "Macie: wait for job completion"
         if: inputs.test_macie
         run: |
-          for attempt in $(seq 1 40); do
+          # The first classification job in a new account/region can take well over
+          # 10 minutes while AWS provisions the Macie scanning backend; later runs
+          # are typically much faster. 100 attempts * 15s = up to 25 minutes.
+          for attempt in $(seq 1 100); do
             STATUS=$(aws macie2 describe-classification-job --job-id "$JOB_ID" --query jobStatus --output text)
             echo "Attempt ${attempt}: job status is ${STATUS}"
             if [ "$STATUS" = "COMPLETE" ]; then
