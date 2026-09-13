@@ -164,13 +164,18 @@ jobs:
           if aws s3api head-object --bucket "$BUCKET" --key "$MACIE_KEY" >/dev/null 2>&1; then
             echo "Fixture already exists at s3://${BUCKET}/${MACIE_KEY} - leaving it untouched."
           else
-            echo "::warning::Fixture didn't exist yet, uploading it now. Macie's inventory refresh can take up to ~24h before a classification job can see it - if this run's Macie steps fail with 0 findings, that's expected on the FIRST run; re-run this workflow tomorrow and it should pass."
+            echo "::warning::Fixture didn't exist yet, uploading it now. Macie's inventory refresh can take up to ~24h before a classification job can see it. Run this workflow again after the fixture appears in Macie's bucket inventory."
             aws s3 cp terraform-modules/comprehend-PII-gateway/pii_test.csv "s3://${BUCKET}/${MACIE_KEY}"
+            echo "MACIE_FIXTURE_NEW=true" >> "$GITHUB_ENV"
           fi
 
       - name: "Macie: run scoped one-time classification job"
         if: inputs.test_macie
         run: |
+          if [ "${MACIE_FIXTURE_NEW:-false}" = "true" ]; then
+            echo "::error::The Macie fixture was uploaded during this run and is not ready for classification yet. Macie refreshes its S3 inventory asynchronously, potentially taking up to 24 hours. Re-run this workflow after the inventory refresh; the Comprehend test (if enabled) has already run independently."
+            exit 1
+          fi
           JOB_DEF=$(jq -n --arg acct "$ACCOUNT_ID" --arg bucket "$BUCKET" '{
             bucketDefinitions: [{accountId: $acct, buckets: [$bucket]}],
             scoping: {includes: {and: [{simpleScopeTerm: {comparator: "STARTS_WITH", key: "OBJECT_KEY", values: ["macie-test/"]}}]}}
@@ -236,7 +241,7 @@ jobs:
             sleep 15
           done
           if [ -z "$FINDING_IDS" ]; then
-            echo "::error::No Macie findings were reported for job ${JOB_ID} after polling, but the test fixture contains PII. If this is the first run since the fixture was uploaded, this can be expected - Macie's bucket inventory refresh can take up to ~24h before it sees a new object. Re-run this workflow later; if it still fails after that, something else is wrong."
+            echo "::error::No Macie findings were reported for job ${JOB_ID} after polling. Confirm that Macie reports the target bucket as classifiable and that macie-test/pii_fixture.csv was present before the inventory refresh. If the fixture was uploaded recently, wait for the inventory refresh and re-run this workflow."
             exit 1
           fi
           echo "PASS: Macie reported findings: ${FINDING_IDS}"
