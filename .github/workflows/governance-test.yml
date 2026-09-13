@@ -152,6 +152,16 @@ jobs:
           aws s3 cp terraform-modules/comprehend-PII-gateway/pii_test.csv "s3://${BUCKET}/${MACIE_KEY}"
           echo "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_ENV"
 
+      - name: "Macie: wait for S3 object to be indexed"
+        if: inputs.test_macie
+        run: |
+          # A classification job created immediately after upload can see
+          # approximateNumberOfObjectsToProcess=0 and complete instantly without
+          # scanning anything, because Macie's bucket inventory used for job
+          # scoping hasn't caught up with a just-uploaded object yet.
+          echo "Waiting 90s for Macie's bucket inventory to catch up with the new object..."
+          sleep 90
+
       - name: "Macie: run scoped one-time classification job"
         if: inputs.test_macie
         run: |
@@ -197,6 +207,13 @@ jobs:
           echo "statistics: $(jq -c '.statistics // {}' job_details.json)"
           echo "--- object being scanned ---"
           aws s3api head-object --bucket "$BUCKET" --key "$MACIE_KEY" --output json || echo "::warning::Could not head-object $MACIE_KEY (may already be cleaned up)"
+
+          OBJECTS_TO_PROCESS=$(jq -r '.statistics.approximateNumberOfObjectsToProcess // 0' job_details.json)
+          IS_ZERO=$(jq -r '(.statistics.approximateNumberOfObjectsToProcess // 0) == 0' job_details.json)
+          if [ "$IS_ZERO" = "true" ]; then
+            echo "::error::Job statistics show approximateNumberOfObjectsToProcess=${OBJECTS_TO_PROCESS}, meaning Macie never saw ${MACIE_KEY} in its bucket inventory in time. This is an indexing-lag issue, not a redaction/detection issue. Try increasing the wait in 'Macie: wait for S3 object to be indexed' or re-run."
+            exit 1
+          fi
 
       - name: "Macie: verify findings were reported"
         if: inputs.test_macie
