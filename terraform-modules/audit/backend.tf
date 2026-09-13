@@ -1,6 +1,6 @@
 terraform {
   backend "s3" {
-    bucket         = "wezvatech-2026-tfstate"
+    bucket         = "wezvatech-s3-2027-tfstate"
     key            = "product-name/envs/audit.tfstate"
     region         = "ap-south-1"
     encrypt        = true
