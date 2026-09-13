@@ -136,8 +136,10 @@ jobs:
       - name: "Comprehend: clean up test objects"
         if: always() && inputs.test_comprehend
         run: |
+          # Keep the redacted result in S3 so it can be inspected after the run.
+          # Always remove the unmasked input from this test.
           aws s3 rm "s3://${BUCKET}/${RAW_KEY}" || true
-          aws s3 rm "s3://${BUCKET}/${PROCESSED_KEY}" || true
+          echo "Retained redacted output at s3://${BUCKET}/${PROCESSED_KEY}"
 
       # ---------------------------------------------------------------------
       # Macie: upload an unredacted copy under a prefix the PII gateway does
