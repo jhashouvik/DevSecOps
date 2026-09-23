@@ -1,9 +1,9 @@
 variable "amiid" {
-  default = "ami-07a00cf47dbbc844c"
+  default = "ami-01a00762f46d584a1"
 }
 
 variable "type" {
-  default = "t2.micro"
+  default = "t2.large"
 }
 
 variable "pemfile" { 
