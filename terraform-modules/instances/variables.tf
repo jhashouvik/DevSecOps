@@ -17,7 +17,7 @@ variable "pemfile" {
 
 variable "volsize" {
   type = number
-  default = 8
+  default = 30
 }
 
 variable "servername" {

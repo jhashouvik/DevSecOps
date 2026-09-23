@@ -34,6 +34,7 @@ resource "aws_instance" "server" {
   
    root_block_device {
        volume_size = var.volsize
+       volume_type = "gp3"
    }
    associate_public_ip_address = true
 
