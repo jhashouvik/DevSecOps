@@ -12,8 +12,12 @@ provider "aws" {
 variable "myhosts" {
   type = map
   default = {
-    TESTMACHINE = "t2.micro"
+    TESTMACHINE = "t2.large"
   }
+}
+
+variable "amiid" {
+  default = "ami-01a00762f46d584a1"
 }
 
 variable "mykey" { 
@@ -25,6 +29,7 @@ module "server" {
   servername = each.key
   type = each.value  
   pemfile = var.mykey
+  amiid = var.amiid
   source = "../instances"
 }
 
