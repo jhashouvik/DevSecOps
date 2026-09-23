@@ -5,21 +5,17 @@ data "aws_vpc" "default" {
     default = true
 }
 
-data "aws_prefix_list" "ec2_instance_connect" {
-    name = "com.amazonaws.ap-south-1.ec2-instance-connect"
-}
-
 resource "aws_security_group" "server" {
     name_prefix = "${var.servername}-"
     description = "Allow EC2 Instance Connect SSH access"
     vpc_id      = data.aws_vpc.default.id
 
     ingress {
-        description     = "EC2 Instance Connect SSH"
+        description     = "SSH access"
         from_port       = 22
         to_port         = 22
         protocol        = "tcp"
-        prefix_list_ids = [data.aws_prefix_list.ec2_instance_connect.id]
+        cidr_blocks     = var.ssh_cidr_blocks
     }
 
     egress {
